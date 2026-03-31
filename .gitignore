@@ -12,7 +12,6 @@ vhc-monitor.yaml
 # Runtime artifacts
 *.log*
 *-state.json
-*.spec
 
 # Plans and AI
 Plans/*
