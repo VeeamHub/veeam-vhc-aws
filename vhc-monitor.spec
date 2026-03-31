@@ -5,7 +5,7 @@ a = Analysis(
     ['vhc_monitor/cli.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('config/example.yaml', 'config')],
     hiddenimports=[
         'vhc_monitor',
         'vhc_monitor.core',

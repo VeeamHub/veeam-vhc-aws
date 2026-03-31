@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 permissions:
   contents: write
@@ -77,6 +77,47 @@ jobs:
       - name: Build executable
         run: pyinstaller vhc-monitor.spec --noconfirm
 
+      - name: Bundle release zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-bundle -Force | Out-Null
+          Copy-Item dist/vhc-monitor.exe release-bundle/
+          Copy-Item setup.ps1 release-bundle/
+          Copy-Item config/example.yaml release-bundle/
+          # Create a quick-start guide for the bundle
+          @"
+          # vhc-monitor ${{ steps.version.outputs.tag }}
+
+          ## Quick Start
+
+          1. Run setup (creates config + scheduled task):
+
+              .\setup.ps1 -AlertUrl "https://ntfy.example.com/veeam-alerts"
+
+          2. Or manually configure:
+
+              Copy example.yaml to vhc-monitor.yaml
+              Edit with your server details
+              .\vhc-monitor.exe all -c vhc-monitor.yaml
+
+          ## First Time?
+
+          Just double-click vhc-monitor.exe — it will guide you.
+
+          ## Commands
+
+              vhc-monitor.exe setup                        Create config file
+              vhc-monitor.exe all -c vhc-monitor.yaml      Run all monitors
+              vhc-monitor.exe test-connection -c config     Test server connectivity
+              vhc-monitor.exe serve -c config -p 9100       Prometheus metrics server
+              vhc-monitor.exe --help                        Show all commands
+
+          ## Docs
+
+          https://github.com/VeeamHub/veeam-vhc-monitor
+          "@ | Out-File -FilePath release-bundle/README.txt -Encoding utf8
+          Compress-Archive -Path release-bundle/* -DestinationPath "vhc-monitor-${{ steps.version.outputs.tag }}-windows.zip"
+
       - name: VirusTotal Scan
         if: env.VT_API_KEY != ''
         uses: crazy-max/ghaction-virustotal@v4
@@ -105,9 +146,8 @@ jobs:
         shell: bash
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
+            "vhc-monitor-${{ steps.version.outputs.tag }}-windows.zip" \
             dist/vhc-monitor.exe \
-            setup.ps1 \
-            config/example.yaml \
             --title "vhc-monitor ${{ steps.version.outputs.tag }}" \
             --generate-notes
 
@@ -118,7 +158,6 @@ jobs:
         shell: bash
         run: |
           gh release upload "${{ steps.version.outputs.tag }}" \
+            "vhc-monitor-${{ steps.version.outputs.tag }}-windows.zip" \
             dist/vhc-monitor.exe \
-            setup.ps1 \
-            config/example.yaml \
             --clobber

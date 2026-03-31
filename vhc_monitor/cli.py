@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -608,3 +609,129 @@ def diagnose(
 def version() -> None:
     """Print the vhc-monitor version."""
     console.print(f"vhc-monitor v{__version__}")
+
+
+@app.command()
+def setup(
+    config_path: Optional[str] = typer.Option(None, "--output", "-o", help="Config file output path"),
+) -> None:
+    """Interactive first-time setup — creates a config file."""
+    import shutil
+
+    if config_path is None:
+        config_path = "./vhc-monitor.yaml"
+
+    if os.path.exists(config_path):
+        overwrite = typer.confirm(f"Config file {config_path} already exists. Overwrite?", default=False)
+        if not overwrite:
+            console.print("[yellow]Setup cancelled.[/yellow]")
+            raise typer.Exit(0)
+
+    # Find bundled example config (check PyInstaller _MEIPASS, then relative paths)
+    base_dirs = [os.path.dirname(os.path.dirname(__file__))]
+    if getattr(sys, '_MEIPASS', None):
+        base_dirs.insert(0, sys._MEIPASS)
+    base_dirs.append(os.path.dirname(sys.executable))
+
+    example_candidates = []
+    for base in base_dirs:
+        example_candidates.append(os.path.join(base, "config", "example.yaml"))
+        example_candidates.append(os.path.join(base, "example.yaml"))
+
+    example_path = None
+    for candidate in example_candidates:
+        if os.path.exists(candidate):
+            example_path = candidate
+            break
+
+    if example_path:
+        shutil.copy2(example_path, config_path)
+        console.print(f"\n[green]Config file created:[/green] {os.path.abspath(config_path)}")
+    else:
+        # Generate minimal config inline
+        minimal = """# vhc-monitor.yaml — Edit this file with your server details
+global:
+  timeout_seconds: 30
+  retry_count: 2
+  logging:
+    level: INFO
+    file: ./vhc-monitor.log
+
+servers:
+  - name: my-vbr
+    type: vbr
+    url: https://vbr-server:9419
+    username: DOMAIN\\\\backupadmin
+    password: ""
+    api_version: "1.3-rev1"
+    verify_ssl: false
+
+  # Uncomment for VBAWS:
+  # - name: my-vbaws
+  #   type: vbaws
+  #   url: https://vbaws-appliance
+  #   username: admin
+  #   password: ""
+  #   verify_ssl: false
+
+output:
+  - type: json_stdout
+
+repo_health:
+  enabled: true
+  thresholds:
+    free_space_warning_pct: 15
+    free_space_critical_pct: 5
+
+retention:
+  enabled: true
+  thresholds:
+    overage_multiplier: 1.5
+    orphan_detection: true
+
+worker_health:
+  enabled: true
+  lookback_hours: 24
+"""
+        with open(config_path, "w") as f:
+            f.write(minimal)
+        console.print(f"\n[green]Config file created:[/green] {os.path.abspath(config_path)}")
+
+    console.print("\n[bold]Next steps:[/bold]")
+    console.print(f"  1. Edit [cyan]{config_path}[/cyan] with your server details")
+    console.print(f"  2. Test connectivity:  [cyan]vhc-monitor test-connection -c {config_path}[/cyan]")
+    console.print(f"  3. Run all monitors:   [cyan]vhc-monitor all -c {config_path}[/cyan]")
+    console.print()
+
+
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    """VHC monitoring toolkit for Veeam backup infrastructure."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # No subcommand — show friendly welcome (useful when double-clicking exe)
+    console.print(f"\n[bold cyan]vhc-monitor v{__version__}[/bold cyan]")
+    console.print("Continuous monitoring for Veeam backup infrastructure.\n")
+
+    # Check if config exists
+    config_exists = os.path.exists("./vhc-monitor.yaml")
+
+    if config_exists:
+        console.print("[green]Config found:[/green] ./vhc-monitor.yaml\n")
+        console.print("Commands:")
+        console.print("  [cyan]vhc-monitor all -c vhc-monitor.yaml[/cyan]     Run all monitors")
+        console.print("  [cyan]vhc-monitor test-connection -c vhc-monitor.yaml[/cyan]  Test connectivity")
+        console.print("  [cyan]vhc-monitor serve -c vhc-monitor.yaml[/cyan]   Start Prometheus server")
+        console.print("  [cyan]vhc-monitor --help[/cyan]                      Show all commands")
+    else:
+        console.print("[yellow]No config file found.[/yellow]\n")
+        console.print("Get started:")
+        console.print("  [cyan]vhc-monitor setup[/cyan]          Create a config file")
+        console.print("  [cyan]vhc-monitor --help[/cyan]         Show all commands")
+
+    console.print()
+
+    # If running as exe (not in a terminal with args), pause so window stays open
+    if getattr(sys, 'frozen', False):
+        console.input("[dim]Press Enter to exit...[/dim]")
