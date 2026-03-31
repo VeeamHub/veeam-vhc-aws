@@ -1,0 +1,37 @@
+[
+  {
+    "id": "repo-001",
+    "name": "Local-Backup-Repo",
+    "type": "WinLocal",
+    "capacityGB": 1000,
+    "freeGB": 500
+  },
+  {
+    "id": "repo-002",
+    "name": "Low-Space-Repo",
+    "type": "WinLocal",
+    "capacityGB": 500,
+    "freeGB": 50
+  },
+  {
+    "id": "repo-003",
+    "name": "Critical-Space-Repo",
+    "type": "WinLocal",
+    "capacityGB": 200,
+    "freeGB": 5
+  },
+  {
+    "id": "repo-004",
+    "name": "Unreachable-Repo",
+    "type": "WinLocal",
+    "capacityGB": 0,
+    "freeGB": 0
+  },
+  {
+    "id": "repo-005",
+    "name": "S3-External-Repo",
+    "type": "ExternalS3",
+    "capacityGB": 5000,
+    "freeGB": 4000
+  }
+]

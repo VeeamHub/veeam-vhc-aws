@@ -1,0 +1,18 @@
+[
+  {
+    "id": "job-001",
+    "name": "Daily-VM-Backup",
+    "storage": {
+      "retentionType": "cycles",
+      "retainCycles": 7
+    }
+  },
+  {
+    "id": "job-002",
+    "name": "Weekly-Archive",
+    "storage": {
+      "retentionType": "days",
+      "retainDays": 30
+    }
+  }
+]

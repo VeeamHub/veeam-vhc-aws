@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+
+# Config files with secrets
+vhc-monitor.yaml
+
+# Runtime artifacts
+*.log*
+*-state.json
+*.spec
+
+# Plans and AI
+Plans/*
+CLAUDE.md

@@ -1,0 +1,60 @@
+[
+  {
+    "id": "vbaws-001",
+    "name": "EC2-Backup-Policy-1",
+    "type": "BackupSession",
+    "status": "Success",
+    "result": {"message": ""},
+    "creationTime": "2026-03-19T06:00:00Z"
+  },
+  {
+    "id": "vbaws-002",
+    "name": "EC2-Backup-Policy-1",
+    "type": "BackupSession",
+    "status": "Failed",
+    "result": {"message": "Connection timeout to worker instance"},
+    "creationTime": "2026-03-19T12:00:00Z"
+  },
+  {
+    "id": "vbaws-003",
+    "name": "EC2-Retention-Policy-1",
+    "type": "RetentionSession",
+    "status": "Failed",
+    "result": {"message": "Cannot allocate IP address in subnet subnet-0abc123def456. InsufficientFreeAddressesInSubnet"},
+    "creationTime": "2026-03-19T08:00:00Z"
+  },
+  {
+    "id": "vbaws-004",
+    "name": "EC2-Retention-Policy-2",
+    "type": "RetentionSession",
+    "status": "Success",
+    "deletedItems": 5,
+    "result": {"message": ""},
+    "creationTime": "2026-03-19T09:00:00Z"
+  },
+  {
+    "id": "vbaws-005",
+    "name": "EC2-Retention-Policy-3",
+    "type": "RetentionSession",
+    "status": "Success",
+    "deletedItems": 0,
+    "result": {"message": ""},
+    "creationTime": "2026-03-19T10:00:00Z"
+  },
+  {
+    "id": "vbaws-006",
+    "name": "EC2-Restore-1",
+    "type": "RestoreSession",
+    "status": "Success",
+    "result": {"message": ""},
+    "creationTime": "2026-03-19T14:00:00Z"
+  },
+  {
+    "id": "vbaws-007",
+    "name": "EC2-Backup-Policy-2",
+    "type": "BackupSession",
+    "status": "Success",
+    "result": {"message": ""},
+    "creationTime": "2026-03-19T18:00:00Z"
+  }
+]
