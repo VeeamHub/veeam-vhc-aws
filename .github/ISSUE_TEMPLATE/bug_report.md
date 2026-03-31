@@ -1,8 +1,8 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Report a problem with vhc-monitor
 title: ''
-labels: ''
+labels: bug
 assignees: ''
 
 ---
@@ -12,27 +12,29 @@ A clear and concise description of what the bug is.
 
 **To Reproduce**
 Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+1. Run command '...'
+2. With config '...'
+3. See error
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Environment:**
+ - OS: [e.g. Windows Server 2022, Ubuntu 22.04]
+ - Python version: [e.g. 3.12, or standalone exe]
+ - vhc-monitor version: [e.g. 0.2.0]
+ - VBR version: [e.g. 12.3]
+ - VBAWS version: [if applicable]
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+**Config (redact credentials):**
+```yaml
+# Paste relevant config sections here (remove passwords)
+```
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
+**Log output:**
+```
+# Paste relevant log lines here
+```
 
 **Additional context**
 Add any other context about the problem here.

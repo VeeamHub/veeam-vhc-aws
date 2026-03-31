@@ -1,0 +1,17 @@
+[
+  {
+    "id": "backup-001",
+    "jobId": "job-001",
+    "name": "Daily-VM-Backup"
+  },
+  {
+    "id": "backup-002",
+    "jobId": "job-002",
+    "name": "Weekly-Archive"
+  },
+  {
+    "id": "backup-003",
+    "jobId": "job-orphan",
+    "name": "Orphaned-Old-Backup"
+  }
+]

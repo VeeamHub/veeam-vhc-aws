@@ -1,0 +1,33 @@
+[
+  {
+    "id": "sess-001",
+    "name": "S3-External-Repo",
+    "type": "ExternalMaintenanceSession",
+    "status": "Failed",
+    "result": {
+      "result": "Failed",
+      "message": "The AWS Access Key Id you provided does not exist in our records. InvalidAccessKeyId"
+    },
+    "creationTime": "2026-03-19T10:00:00Z"
+  },
+  {
+    "id": "sess-002",
+    "name": "S3-External-Repo-2",
+    "type": "ExternalMaintenanceSession",
+    "status": "Success",
+    "result": {
+      "message": ""
+    },
+    "creationTime": "2026-03-19T12:00:00Z"
+  },
+  {
+    "id": "sess-003",
+    "name": "Daily-Backup",
+    "type": "BackupSession",
+    "status": "Success",
+    "result": {
+      "message": ""
+    },
+    "creationTime": "2026-03-19T14:00:00Z"
+  }
+]
