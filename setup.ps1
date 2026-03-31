@@ -99,18 +99,168 @@ if (-not $vbrUrl -and -not $vbawsUrl) {
     Write-Host "  WARNING: No servers configured. Edit $configPath manually." -ForegroundColor Yellow
 }
 
-# Build output section
+# --- 2b. Configure notifications ---
+Write-Host ""
+Write-Host "[2b/5] Setting up notifications" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "  How do you want to be notified of issues?" -ForegroundColor White
+Write-Host ""
+Write-Host "  [1] ntfy.sh push notifications (free, simple, recommended)" -ForegroundColor White
+Write-Host "  [2] Slack webhook" -ForegroundColor White
+Write-Host "  [3] Microsoft Teams webhook" -ForegroundColor White
+Write-Host "  [4] PagerDuty" -ForegroundColor White
+Write-Host "  [5] Email (SMTP)" -ForegroundColor White
+Write-Host "  [6] Multiple (configure several)" -ForegroundColor White
+Write-Host "  [7] None / I'll configure later" -ForegroundColor DarkGray
+Write-Host ""
+
 $outputBlock = "output:`n  - type: json_stdout"
-if ($AlertUrl) {
-    $outputBlock += @"
+
+function Add-NotificationBlock {
+    param([string]$CurrentBlock)
+
+    $choice = Read-Host "  Select notification type (1-7)"
+
+    switch ($choice) {
+        "1" {
+            if ($AlertUrl) {
+                $url = $AlertUrl
+            } else {
+                Write-Host ""
+                Write-Host "  ntfy sends push notifications to your phone or desktop." -ForegroundColor DarkGray
+                Write-Host "  Free hosted: https://ntfy.sh/<your-topic-name>" -ForegroundColor DarkGray
+                Write-Host "  Self-hosted: https://your-server/your-topic" -ForegroundColor DarkGray
+                Write-Host ""
+                $url = Read-Host "  ntfy topic URL"
+            }
+            if ($url) {
+                $severity = Read-Host "  Minimum severity to notify (ok/warning/critical) [warning]"
+                if (-not $severity) { $severity = "warning" }
+                $CurrentBlock += @"
 
   - type: webhook
-    url: $AlertUrl
+    url: $url
     template: ntfy
-    min_severity: warning
+    min_severity: $severity
     deduplicate: true
 "@
+                Write-Host "  -> ntfy notifications configured" -ForegroundColor Green
+            }
+        }
+        "2" {
+            Write-Host ""
+            Write-Host "  Create an Incoming Webhook in Slack:" -ForegroundColor DarkGray
+            Write-Host "  Apps > Incoming Webhooks > Add to Slack > Choose channel" -ForegroundColor DarkGray
+            Write-Host ""
+            $url = Read-Host "  Slack webhook URL"
+            if ($url) {
+                $severity = Read-Host "  Minimum severity to notify (ok/warning/critical) [warning]"
+                if (-not $severity) { $severity = "warning" }
+                $CurrentBlock += @"
+
+  - type: webhook
+    url: $url
+    template: slack
+    min_severity: $severity
+"@
+                Write-Host "  -> Slack notifications configured" -ForegroundColor Green
+            }
+        }
+        "3" {
+            Write-Host ""
+            Write-Host "  Create a Workflow webhook in Teams:" -ForegroundColor DarkGray
+            Write-Host "  Channel > Manage > Connectors > Incoming Webhook" -ForegroundColor DarkGray
+            Write-Host ""
+            $url = Read-Host "  Teams webhook URL"
+            if ($url) {
+                $severity = Read-Host "  Minimum severity to notify (ok/warning/critical) [warning]"
+                if (-not $severity) { $severity = "warning" }
+                $CurrentBlock += @"
+
+  - type: webhook
+    url: $url
+    template: teams
+    min_severity: $severity
+"@
+                Write-Host "  -> Teams notifications configured" -ForegroundColor Green
+            }
+        }
+        "4" {
+            Write-Host ""
+            Write-Host "  Use your PagerDuty Events API v2 integration key." -ForegroundColor DarkGray
+            Write-Host ""
+            $url = Read-Host "  PagerDuty Events URL [https://events.pagerduty.com/v2/enqueue]"
+            if (-not $url) { $url = "https://events.pagerduty.com/v2/enqueue" }
+            $severity = Read-Host "  Minimum severity to notify (ok/warning/critical) [critical]"
+            if (-not $severity) { $severity = "critical" }
+            $CurrentBlock += @"
+
+  - type: webhook
+    url: $url
+    template: pagerduty
+    min_severity: $severity
+"@
+            Write-Host "  -> PagerDuty notifications configured" -ForegroundColor Green
+        }
+        "5" {
+            Write-Host ""
+            $smtpHost = Read-Host "  SMTP host (e.g. smtp.office365.com)"
+            $smtpPort = Read-Host "  SMTP port [587]"
+            if (-not $smtpPort) { $smtpPort = "587" }
+            $fromAddr = Read-Host "  From email address"
+            $toAddrs = Read-Host "  To email address(es), comma-separated"
+            $smtpUser = Read-Host "  SMTP username (blank if none)"
+            $smtpPassBlock = ""
+            if ($smtpUser) {
+                $smtpPass = Read-Host "  SMTP password" -AsSecureString
+                $smtpPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($smtpPass)
+                )
+                $smtpPassBlock = @"
+
+    smtp_username: "$smtpUser"
+    smtp_password: "$smtpPassPlain"
+"@
+            }
+            $severity = Read-Host "  Minimum severity to notify (ok/warning/critical) [critical]"
+            if (-not $severity) { $severity = "critical" }
+
+            $toList = ($toAddrs -split ',' | ForEach-Object { "      - $($_.Trim())" }) -join "`n"
+            $CurrentBlock += @"
+
+  - type: email
+    smtp_host: $smtpHost
+    smtp_port: $smtpPort
+    from_addr: $fromAddr
+    to_addrs:
+$toList
+    min_severity: $severity
+    use_tls: true$smtpPassBlock
+"@
+            Write-Host "  -> Email notifications configured" -ForegroundColor Green
+        }
+        "6" {
+            Write-Host "  Configure each notification type. Enter 7 when done." -ForegroundColor DarkGray
+            $done = $false
+            while (-not $done) {
+                Write-Host ""
+                $CurrentBlock = Add-NotificationBlock $CurrentBlock
+                $more = Read-Host "  Add another notification? (y/n)"
+                if ($more -ne "y") { $done = $true }
+            }
+        }
+        "7" {
+            Write-Host "  -> Skipping notifications. Edit config later to add them." -ForegroundColor DarkGray
+        }
+        default {
+            Write-Host "  -> Invalid choice, skipping notifications." -ForegroundColor Yellow
+        }
+    }
+
+    return $CurrentBlock
 }
+
+$outputBlock = Add-NotificationBlock $outputBlock
 
 $logPath = Join-Path $InstallDir "vhc-monitor.log"
 $statePath = Join-Path $InstallDir "vhc-monitor-state.json"
