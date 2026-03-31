@@ -39,10 +39,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install tools
-        run: pip install pip-audit bandit[toml] .
+        run: pip install pip-audit bandit[toml] -e .
 
       - name: Dependency audit
-        run: pip-audit --strict --desc --ignore-vuln PYSEC-0 --skip-editable
+        run: pip-audit --strict --desc --skip-editable
 
       - name: Bandit SAST
         run: bandit -r vhc_monitor/ -f screen
