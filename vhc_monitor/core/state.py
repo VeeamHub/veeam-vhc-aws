@@ -17,7 +17,7 @@ def _finding_key(finding: Finding, server: str, monitor: str) -> str:
     # Use resource + first 80 chars of message as the identity
     # This groups "the same problem" even if details change slightly
     identity = f"{server}|{monitor}|{finding.resource}|{finding.message[:80]}"
-    return hashlib.md5(identity.encode()).hexdigest()
+    return hashlib.md5(identity.encode(), usedforsecurity=False).hexdigest()
 
 
 class FindingState:
