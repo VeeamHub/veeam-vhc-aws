@@ -27,11 +27,13 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
-      - name: Install project dependencies
-        run: pip install -e .
+      - name: Generate dependency list
+        run: |
+          pip install .
+          pip freeze --exclude vhc-monitor > requirements-audit.txt
 
       - name: Run pip-audit
-        run: pip-audit --strict --desc --skip-editable
+        run: pip-audit --strict --desc -r requirements-audit.txt
 
   bandit:
     name: Bandit SAST

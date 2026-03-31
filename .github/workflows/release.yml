@@ -39,10 +39,12 @@ jobs:
           python-version: '3.12'
 
       - name: Install tools
-        run: pip install pip-audit bandit[toml] -e .
+        run: |
+          pip install pip-audit bandit[toml] .
+          pip freeze --exclude vhc-monitor --exclude pip-audit --exclude bandit > requirements-audit.txt
 
       - name: Dependency audit
-        run: pip-audit --strict --desc --skip-editable
+        run: pip-audit --strict --desc -r requirements-audit.txt
 
       - name: Bandit SAST
         run: bandit -r vhc_monitor/ -f screen
