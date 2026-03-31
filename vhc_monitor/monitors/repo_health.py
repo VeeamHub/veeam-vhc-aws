@@ -140,7 +140,8 @@ class RepoHealthMonitor(BaseMonitor):
 
         # Session types that indicate repo-related issues
         _REPO_SESSION_TYPES = {
-            "externalmaintenance", "configurationresynchronize",
+            "externalmaintenance", "externalmaintenancesession",
+            "configurationresynchronize",
             "repositoryrescan", "repositorymaintenance",
         }
 

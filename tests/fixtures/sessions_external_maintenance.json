@@ -5,6 +5,7 @@
     "type": "ExternalMaintenanceSession",
     "status": "Failed",
     "result": {
+      "result": "Failed",
       "message": "The AWS Access Key Id you provided does not exist in our records. InvalidAccessKeyId"
     },
     "creationTime": "2026-03-19T10:00:00Z"

@@ -2,7 +2,7 @@ name: Build & Test
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
   pull_request:
     branches: [main]
 
@@ -26,12 +26,10 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
 
-  # Build Windows executable and scan with VirusTotal
   build-exe:
-    name: Build & VirusTotal Scan
+    name: Build Windows Executable
     runs-on: windows-latest
     needs: test
-    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -52,12 +50,3 @@ jobs:
         with:
           name: vhc-monitor-windows
           path: dist/vhc-monitor.exe
-
-      - name: VirusTotal Scan
-        if: env.VT_API_KEY != ''
-        uses: crazy-max/ghaction-virustotal@v4
-        with:
-          vt_api_key: ${{ secrets.VT_API_KEY }}
-          files: dist/vhc-monitor.exe
-        env:
-          VT_API_KEY: ${{ secrets.VT_API_KEY }}

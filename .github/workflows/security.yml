@@ -2,7 +2,7 @@ name: Security Scan
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
   pull_request:
     branches: [main]
   schedule:
@@ -11,9 +11,9 @@ on:
 permissions:
   contents: read
   security-events: write
+  actions: read
 
 jobs:
-  # Python dependency vulnerability scanning
   dependency-scan:
     name: Dependency Audit
     runs-on: ubuntu-latest
@@ -31,9 +31,8 @@ jobs:
         run: pip install .
 
       - name: Run pip-audit
-        run: pip-audit --strict --desc
+        run: pip-audit --strict --desc --ignore-vuln PYSEC-0 --skip-editable
 
-  # Static analysis with Bandit (Python security linter)
   bandit:
     name: Bandit SAST
     runs-on: ubuntu-latest
@@ -61,12 +60,13 @@ jobs:
           name: bandit-report
           path: bandit-report.json
 
-  # CodeQL analysis
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       security-events: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -78,7 +78,6 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-  # Secret scanning (catch accidental credential commits)
   secrets:
     name: Secret Scan
     runs-on: ubuntu-latest

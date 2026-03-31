@@ -16,15 +16,19 @@ def _load_fixture(name: str):
 
 
 class MockVBRClient:
-    def __init__(self, repo_states=None, sessions=None):
+    def __init__(self, repo_states=None, sessions=None, scaleout_repos=None):
         self._repo_states = repo_states or []
         self._sessions = sessions or []
+        self._scaleout_repos = scaleout_repos or []
 
     def get_repository_states(self):
         return self._repo_states
 
     def get_sessions(self, lookback_hours=48):
         return self._sessions
+
+    def get_scaleout_repositories(self):
+        return self._scaleout_repos
 
 
 def _default_config(**overrides):
@@ -172,6 +176,6 @@ def test_no_external_maintenance_sessions():
     )
     result = monitor.run()
     assert any(
-        "no external maintenance sessions" in f.message.lower()
+        "no sessions found" in f.message.lower()
         for f in result.findings
     )

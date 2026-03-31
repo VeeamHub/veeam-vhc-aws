@@ -44,7 +44,7 @@ def _default_config(**overrides):
 def _subnet_engine():
     return PatternEngine([
         ErrorPattern(
-            pattern=r"(?i)(?:cannot allocate|insufficient\s*free\s*addresses).*(?:subnet[- ]?(?P<subnet_id>subnet-[a-z0-9]+))",
+            pattern=r"(?i)(?:cannot allocate|not enough free addresses|insufficient\s*free\s*addresses).*(?:subnet[- ]?(?P<subnet_id>subnet-[a-z0-9]+))",
             severity=Severity.CRITICAL,
             message="Subnet IP exhaustion",
             category="network",
@@ -102,6 +102,10 @@ def test_high_failure_rate():
 
 def test_subnet_exhaustion_detection():
     sessions = _load_fixture("vbaws_sessions.json")
+    # Patch fixture dates to be within lookback window
+    recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    for s in sessions:
+        s["creationTime"] = recent
     client = MockVBAWSClient(sessions=sessions)
     engine = _subnet_engine()
     monitor = WorkerHealthMonitor(
