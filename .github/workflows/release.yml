@@ -66,13 +66,16 @@ jobs:
           pip install .
           pip install pyinstaller
 
-      - name: Extract version
+      - name: Set version
         id: version
         shell: bash
         run: |
-          VERSION=$(python -c "from vhc_monitor import __version__; print(__version__)")
+          # Base version from code + run number for unique, auto-incrementing releases
+          BASE=$(python -c "from vhc_monitor import __version__; print(__version__)")
+          VERSION="${BASE}.${GITHUB_RUN_NUMBER}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
 
       - name: Build executable
         run: pyinstaller vhc-monitor.spec --noconfirm
@@ -84,7 +87,6 @@ jobs:
           Copy-Item dist/vhc-monitor.exe release-bundle/
           Copy-Item setup.ps1 release-bundle/
           Copy-Item config/example.yaml release-bundle/
-          # Create a quick-start guide for the bundle
           @"
           # vhc-monitor ${{ steps.version.outputs.tag }}
 
@@ -127,20 +129,7 @@ jobs:
         env:
           VT_API_KEY: ${{ secrets.VT_API_KEY }}
 
-      - name: Check if release exists
-        id: check
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Create GitHub Release
-        if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -150,14 +139,3 @@ jobs:
             dist/vhc-monitor.exe \
             --title "vhc-monitor ${{ steps.version.outputs.tag }}" \
             --generate-notes
-
-      - name: Upload to existing release
-        if: steps.check.outputs.exists == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          gh release upload "${{ steps.version.outputs.tag }}" \
-            "vhc-monitor-${{ steps.version.outputs.tag }}-windows.zip" \
-            dist/vhc-monitor.exe \
-            --clobber
