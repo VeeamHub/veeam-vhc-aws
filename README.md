@@ -14,42 +14,60 @@ Continuous monitoring toolkit for Veeam backup infrastructure. Tracks health and
 
 ## 📗 Documentation
 
-### Quick Start
+### Install
 
-**Standalone executable (Windows):**
+#### Option 1: Windows Standalone (Recommended)
 
-Download `vhc-monitor.exe` and `setup.ps1` from the [latest release](https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest), then run:
+1. Download the **zip bundle** from the [latest release](https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest)
+2. Extract to a folder (e.g., your Desktop or `C:\VHC`)
+3. Right-click `setup.ps1` > **Run with PowerShell** (or open PowerShell and run `.\setup.ps1`)
+4. The setup wizard will walk you through:
+   - Configuring your VBR and/or VBAWS servers
+   - Choosing how you want to be notified (ntfy, Slack, Teams, PagerDuty, email, or multiple)
+   - Creating a Windows Scheduled Task to run automatically every 5 minutes
+
+That's it. The monitor is now running on a schedule and will alert you when issues are detected.
+
+**Or run setup with parameters for automation:**
 
 ```powershell
-.\setup.ps1 -AlertUrl "https://ntfy.example.com/veeam-alerts"
+.\setup.ps1 -AlertUrl "https://ntfy.sh/my-veeam-alerts" -IntervalMinutes 10 -InstallDir "C:\VHC"
 ```
 
-**From source (any platform):**
+#### Option 2: From Source (any platform)
 
 ```bash
+# Requires Python 3.11+
 pip install .
-cp config/example.yaml ./vhc-monitor.yaml
-# Edit vhc-monitor.yaml with your server details
-vhc-monitor all -c vhc-monitor.yaml
+vhc-monitor setup              # Creates a config file interactively
+vhc-monitor all -c vhc-monitor.yaml   # Run all monitors
 ```
 
-Requires Python 3.11+.
+#### Option 3: Docker
+
+```bash
+docker build -t vhc-monitor .
+docker run -v /path/to/config.yaml:/config/config.yaml vhc-monitor
+```
 
 ### Usage
 
 ```bash
+# Interactive setup — creates config file
+vhc-monitor setup
+
+# Run all monitors on all servers
+vhc-monitor all -c vhc-monitor.yaml
+
 # Run individual monitors
 vhc-monitor repo-health -c config.yaml
 vhc-monitor retention -c config.yaml
 vhc-monitor worker-health -c config.yaml
 
-# Run all monitors on all servers (parallel auto-enabled for 3+ servers)
-vhc-monitor all -c config.yaml
-
-# Prometheus HTTP server (scrape interval in seconds)
+# Prometheus HTTP server (long-running mode)
 vhc-monitor serve -c config.yaml --port 9100 --interval 300
 
-# Test connectivity to VBR and VBAWS
+# Test connectivity to all configured servers
 vhc-monitor test-connection -c config.yaml
 
 # Inspect error patterns or match an error string
@@ -115,39 +133,80 @@ VEEAM_VBR_URL, VEEAM_VBR_USERNAME, VEEAM_VBR_PASSWORD, VEEAM_VBR_API_VERSION
 VEEAM_VBAWS_URL, VEEAM_VBAWS_USERNAME, VEEAM_VBAWS_PASSWORD
 ```
 
-#### Output Handlers
+#### Notifications
 
-Stack multiple outputs in your config. All fire on every monitor run.
+The setup wizard configures notifications for you, but you can also edit the config directly. Stack multiple handlers -- all fire on every monitor run.
 
 | Handler | Template | Use Case |
 |---------|----------|----------|
 | `json_stdout` | -- | Terminal / piping |
 | `json_file` | -- | Log aggregation |
-| `webhook` | `ntfy` | Push notifications |
-| `webhook` | `slack` | Slack alerts |
-| `webhook` | `teams` | Teams alerts |
-| `webhook` | `pagerduty` | Incident management |
+| `webhook` | `ntfy` | Push notifications ([free, self-hostable](https://ntfy.sh)) |
+| `webhook` | `slack` | Slack channel alerts |
+| `webhook` | `teams` | Microsoft Teams alerts |
+| `webhook` | `pagerduty` | PagerDuty incident management |
 | `webhook` | `generic` | Custom integrations |
 | `prometheus` | `pushgateway` | Push metrics to Pushgateway |
 | `prometheus` | `server` | Expose `/metrics` endpoint |
 | `email` | -- | SMTP email reports |
 
-### Building Standalone Executable
+Each handler supports `min_severity` to control when it fires (`ok`, `warning`, `critical`).
+
+Example stacking multiple outputs:
+
+```yaml
+output:
+  - type: json_stdout
+  - type: webhook
+    url: https://ntfy.sh/my-veeam-alerts
+    template: ntfy
+    min_severity: warning
+  - type: email
+    smtp_host: smtp.office365.com
+    smtp_port: 587
+    from_addr: vhc-monitor@example.com
+    to_addrs: ["oncall@example.com"]
+    min_severity: critical
+```
+
+### Uninstall
+
+#### Windows Standalone
 
 ```powershell
-# On Windows
-.\build.ps1
-# Output: dist/vhc-monitor.exe
+# 1. Remove the scheduled task
+Unregister-ScheduledTask -TaskName "VHC Monitor" -Confirm:$false
+
+# 2. Delete the install directory (default: C:\Program Files\VHC)
+Remove-Item -Recurse -Force "$env:ProgramFiles\VHC"
 ```
 
-### Docker
+If you installed to a custom directory, replace the path accordingly.
+
+#### From Source (pip)
 
 ```bash
-docker build -t vhc-monitor .
-docker run -v /path/to/config.yaml:/config/config.yaml vhc-monitor
+pip uninstall vhc-monitor -y
+
+# Remove config and logs
+rm -f ./vhc-monitor.yaml ./vhc-monitor.log ./vhc-monitor-state.json
 ```
 
-### Testing
+#### Docker
+
+```bash
+docker rmi vhc-monitor
+```
+
+### Building from Source
+
+```powershell
+# Build standalone Windows executable
+.\build.ps1
+# Output: dist\vhc-monitor.exe
+```
+
+### Running Tests
 
 ```bash
 pip install -e ".[dev]"
