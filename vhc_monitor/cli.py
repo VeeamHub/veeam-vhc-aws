@@ -773,6 +773,6 @@ if __name__ == "__main__":
                 f.write(f"\n{'='*60}\n")
                 f.write(f"CRASH at {datetime.now(timezone.utc).isoformat()}\n")
                 traceback.print_exc(file=f)
-        except Exception:
-            pass  # If even this fails, nothing more we can do
+        except Exception:  # nosec B110 - intentional: no output channel left
+            pass
         raise
