@@ -1,6 +1,32 @@
-# veeam-vhc-monitor
+<p align="center">
+  <img src="https://raw.githubusercontent.com/VeeamHub/veeam-healthcheck/dev/docs/images/health-check-icon.png" alt="Veeam Health Check" width="100">
+</p>
 
-Continuous monitoring toolkit for Veeam backup infrastructure. Tracks health and compliance across Veeam Backup & Replication (VBR) and Veeam Backup for AWS (VBAWS) with alerting, Prometheus metrics, and cross-correlation of findings.
+<h1 align="center">VHC Monitor</h1>
+
+<p align="center">
+  <strong>Continuous monitoring and alerting for your Veeam backup infrastructure.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/actions/workflows/release.yml"><img src="https://github.com/VeeamHub/veeam-vhc-monitor/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/VeeamHub/veeam-vhc-monitor?label=Latest%20Release" alt="Latest Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/VeeamHub/veeam-vhc-monitor" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+</p>
+
+<p align="center">
+  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest"><strong>Download Latest Release</strong></a> &nbsp;&middot;&nbsp;
+  <a href="https://github.com/VeeamHub/veeam-healthcheck"><strong>Veeam Health Check</strong></a> &nbsp;&middot;&nbsp;
+  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/issues/new/choose"><strong>Report an Issue</strong></a>
+</p>
+
+---
+
+> [!NOTE]
+> VHC Monitor is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, VHC Monitor runs continuously and alerts you the moment something goes wrong.
+
+> This is a community-supported tool and is not an officially supported Veeam product.
 
 ## Features
 
