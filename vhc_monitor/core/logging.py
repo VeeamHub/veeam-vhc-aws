@@ -94,10 +94,11 @@ def setup_logging(config: dict) -> None:
         root_logger.addHandler(file_handler)
     except (PermissionError, OSError) as e:
         # Fall back to stderr if the log file can't be opened (e.g. non-elevated run)
-        stderr_fallback = logging.StreamHandler(sys.stderr)
-        stderr_fallback.setFormatter(formatter)
-        stderr_fallback.addFilter(sensitive_filter)
-        root_logger.addHandler(stderr_fallback)
+        if sys.stderr is not None:
+            stderr_fallback = logging.StreamHandler(sys.stderr)
+            stderr_fallback.setFormatter(formatter)
+            stderr_fallback.addFilter(sensitive_filter)
+            root_logger.addHandler(stderr_fallback)
         root_logger.warning(
             "Cannot write log file '%s' (%s). Logging to stderr instead. "
             "Run with admin/elevated privileges to write to this path.",
@@ -105,7 +106,8 @@ def setup_logging(config: dict) -> None:
         )
 
     # Console handler — stderr so it doesn't pollute JSON stdout output
-    if console_enabled:
+    # Guard: sys.stderr can be None in PyInstaller frozen exes without a console
+    if console_enabled and sys.stderr is not None:
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setFormatter(formatter)
         console_handler.addFilter(sensitive_filter)

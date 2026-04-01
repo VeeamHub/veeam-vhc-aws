@@ -333,7 +333,9 @@ error_patterns:
     category: credential
 "@
 
-$configContent | Out-File -FilePath $configPath -Encoding utf8
+# Use WriteAllText to avoid UTF-8 BOM that PowerShell 5.1's Out-File adds.
+# PyYAML can fail or produce unexpected results when parsing a BOM-prefixed file.
+[IO.File]::WriteAllText($configPath, $configContent, [System.Text.UTF8Encoding]::new($false))
 Write-Host "  -> Config written to $configPath" -ForegroundColor Green
 
 # --- 3. Create Task Scheduler job ---

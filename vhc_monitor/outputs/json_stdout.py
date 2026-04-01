@@ -13,6 +13,10 @@ class JsonStdoutHandler(OutputHandler):
     def emit(self, results: list[MonitorResult]) -> None:
         """Print results as formatted JSON to stdout."""
         output = [r.to_dict() for r in results]
-        json.dump(output, sys.stdout, indent=2, default=str)
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+        # Guard against sys.stdout being None in frozen/detached environments
+        target = sys.stdout
+        if target is None:
+            return
+        json.dump(output, target, indent=2, default=str)
+        target.write("\n")
+        target.flush()

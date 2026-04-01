@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -11,6 +12,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
+
+# PyInstaller frozen exes on Windows can have sys.stdout/stderr set to None
+# when not attached to a console (e.g. Task Scheduler as SYSTEM, or pythonw).
+# Guard against this BEFORE importing Rich/Typer which touch sys.stdout at import.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 import typer
 from rich.console import Console
@@ -743,3 +752,27 @@ def main(ctx: typer.Context) -> None:
     # If running as exe (not in a terminal with args), pause so window stays open
     if getattr(sys, 'frozen', False):
         console.input("[dim]Press Enter to exit...[/dim]")
+
+
+if __name__ == "__main__":
+    try:
+        app()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        # Last-resort crash log — when stdout/stderr/logging all fail,
+        # this file is the only evidence of what went wrong.
+        import traceback
+        crash_path = os.path.join(
+            os.environ.get("ProgramData", os.path.dirname(sys.executable)),
+            "VHC", "vhc-monitor-crash.log",
+        )
+        try:
+            os.makedirs(os.path.dirname(crash_path), exist_ok=True)
+            with open(crash_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"CRASH at {datetime.now(timezone.utc).isoformat()}\n")
+                traceback.print_exc(file=f)
+        except Exception:
+            pass  # If even this fails, nothing more we can do
+        raise
