@@ -20,7 +20,7 @@ Continuous monitoring toolkit for Veeam backup infrastructure. Tracks health and
 
 1. Download the **zip bundle** from the [latest release](https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest)
 2. Extract to a folder (e.g., your Desktop or `C:\VHC`)
-3. Right-click `setup.ps1` > **Run with PowerShell** (or open PowerShell and run `.\setup.ps1`)
+3. Right-click `setup.ps1` > **Run as Administrator** (required to install to Program Files and create a scheduled task)
 4. The setup wizard will walk you through:
    - Configuring your VBR and/or VBAWS servers
    - Choosing how you want to be notified (ntfy, Slack, Teams, PagerDuty, email, or multiple)
