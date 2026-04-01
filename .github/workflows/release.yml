@@ -152,9 +152,9 @@ jobs:
               echo "Malicious: $MALICIOUS | Suspicious: $SUSPICIOUS"
               echo "vt_url=$VT_URL" >> "$GITHUB_OUTPUT"
               echo "malicious=$MALICIOUS" >> "$GITHUB_OUTPUT"
-              # Threshold: >10 malicious = real concern (PyInstaller has FPs, typically 2-8)
-              if [ "$MALICIOUS" -gt 10 ]; then
-                echo "::error::VirusTotal flagged $MALICIOUS engines as malicious (threshold: 10). Review: $VT_URL"
+              # Threshold: >5 malicious = block release. PyInstaller FPs typically hit 2-4 engines.
+              if [ "$MALICIOUS" -gt 5 ]; then
+                echo "::error::VirusTotal flagged $MALICIOUS engines as malicious (threshold: 5). Review: $VT_URL"
                 exit 1
               fi
               echo "VT scan passed ($MALICIOUS malicious detections). Report: $VT_URL"
@@ -174,12 +174,12 @@ jobs:
             --title "vhc-monitor ${{ steps.version.outputs.tag }}" \
             --generate-notes
 
-          # Append VT scan link to release notes if available
-          if [ -n "${{ steps.virustotal.outputs.vt_url }}" ]; then
+          # Append VT scan link to release notes using a temp file to avoid YAML/shell quoting issues
+          VT_URL="${{ steps.virustotal.outputs.vt_url }}"
+          VT_COUNT="${{ steps.virustotal.outputs.malicious }}"
+          if [ -n "$VT_URL" ]; then
             CURRENT_NOTES=$(gh release view "${{ steps.version.outputs.tag }}" --json body -q .body)
-            gh release edit "${{ steps.version.outputs.tag }}" \
-              --notes "${CURRENT_NOTES}
-
----
-**VirusTotal scan:** ${{ steps.virustotal.outputs.vt_url }} (${{ steps.virustotal.outputs.malicious }} malicious detections)"
+            printf '%s\n\nVirusTotal scan: %s (%s malicious detections)\n' \
+              "$CURRENT_NOTES" "$VT_URL" "$VT_COUNT" > /tmp/release-notes.txt
+            gh release edit "${{ steps.version.outputs.tag }}" --notes-file /tmp/release-notes.txt
           fi
