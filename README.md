@@ -78,6 +78,30 @@ vhc-monitor diagnose --match "Access key has expired" -c config.yaml
 vhc-monitor version
 ```
 
+### Alert Deduplication
+
+vhc-monitor tracks finding state between runs so you only get notified when something changes — not on every scheduled execution.
+
+| Event | Behavior |
+|-------|----------|
+| Problem first detected | Alert fires |
+| Problem persists on next run | Silent — no repeat alert |
+| Problem disappears | `RESOLVED` notification fires |
+| Problem comes back later | Treated as new — alert fires again |
+
+State is stored in `vhc-monitor-state.json` (default: `C:\ProgramData\VHC\vhc-monitor-state.json` on Windows). Deleting this file resets all state — every existing finding will re-alert on the next run.
+
+To enable deduplication on webhook handlers, add `deduplicate: true` to the handler config:
+
+```yaml
+output:
+  - type: webhook
+    url: https://ntfy.sh/my-veeam-alerts
+    template: ntfy
+    min_severity: warning
+    deduplicate: true
+```
+
 ### Exit Codes
 
 | Code | Severity |
