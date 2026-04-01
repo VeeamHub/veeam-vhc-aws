@@ -262,8 +262,15 @@ $toList
 
 $outputBlock = Add-NotificationBlock $outputBlock
 
-$logPath = Join-Path $InstallDir "vhc-monitor.log"
-$statePath = Join-Path $InstallDir "vhc-monitor-state.json"
+# Logs and state go in ProgramData so non-elevated manual runs can also write
+$dataDir = Join-Path $env:ProgramData "VHC"
+if (-not (Test-Path $dataDir)) {
+    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+    # Grant Users modify access so non-elevated runs can write logs
+    icacls $dataDir /grant "Users:(OI)(CI)M" | Out-Null
+}
+$logPath = Join-Path $dataDir "vhc-monitor.log"
+$statePath = Join-Path $dataDir "vhc-monitor-state.json"
 
 $configContent = @"
 # VHC Monitor configuration

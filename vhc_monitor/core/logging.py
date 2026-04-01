@@ -80,18 +80,29 @@ def setup_logging(config: dict) -> None:
 
     # File handler with time-based rotation
     log_dir = os.path.dirname(os.path.abspath(log_file))
-    os.makedirs(log_dir, exist_ok=True)
-
-    file_handler = logging.handlers.TimedRotatingFileHandler(
-        filename=log_file,
-        when=rotation_when,
-        interval=rotation_interval,
-        backupCount=rotation_keep,
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.addFilter(sensitive_filter)
-    root_logger.addHandler(file_handler)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        file_handler = logging.handlers.TimedRotatingFileHandler(
+            filename=log_file,
+            when=rotation_when,
+            interval=rotation_interval,
+            backupCount=rotation_keep,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.addFilter(sensitive_filter)
+        root_logger.addHandler(file_handler)
+    except (PermissionError, OSError) as e:
+        # Fall back to stderr if the log file can't be opened (e.g. non-elevated run)
+        stderr_fallback = logging.StreamHandler(sys.stderr)
+        stderr_fallback.setFormatter(formatter)
+        stderr_fallback.addFilter(sensitive_filter)
+        root_logger.addHandler(stderr_fallback)
+        root_logger.warning(
+            "Cannot write log file '%s' (%s). Logging to stderr instead. "
+            "Run with admin/elevated privileges to write to this path.",
+            log_file, e,
+        )
 
     # Console handler — stderr so it doesn't pollute JSON stdout output
     if console_enabled:

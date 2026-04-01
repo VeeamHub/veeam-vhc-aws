@@ -107,7 +107,7 @@ def _build_server_context(server_cfg: dict, global_cfg: dict) -> ServerContext:
 
 def _build_all_servers(config: dict) -> list[ServerContext]:
     """Build ServerContext for each entry in config['servers']."""
-    servers_cfg = config.get("servers", [])
+    servers_cfg = config.get("servers") or []
     global_cfg = config.get("global", {})
     contexts = []
     for server_cfg in servers_cfg:
@@ -417,7 +417,11 @@ def _run_single_monitor(
     config_arg: Optional[str], monitor_name: str, no_servers_msg: str,
 ) -> None:
     """Run a specific monitor on all applicable servers."""
-    cfg, servers, pe, dispatcher, state = _load_and_setup(config_arg)
+    try:
+        cfg, servers, pe, dispatcher, state = _load_and_setup(config_arg)
+    except Exception as e:
+        typer.echo(f"ERROR: Startup failed: {e}", err=True)
+        raise typer.Exit(3)
     results = _run_all_servers(servers, cfg, pe, monitor_filter=monitor_name)
     if not results:
         console.print(f"[yellow]{no_servers_msg}[/yellow]")
@@ -455,7 +459,11 @@ def run_all(
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
 ) -> None:
     """Run all enabled monitors on all servers, cross-correlate findings."""
-    cfg, servers, pe, dispatcher, state = _load_and_setup(config)
+    try:
+        cfg, servers, pe, dispatcher, state = _load_and_setup(config)
+    except Exception as e:
+        typer.echo(f"ERROR: Startup failed: {e}", err=True)
+        raise typer.Exit(3)
 
     if not servers:
         console.print("[yellow]No servers configured.[/yellow]")
