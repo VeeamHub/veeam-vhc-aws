@@ -608,7 +608,7 @@ def diagnose(
 @app.command()
 def version() -> None:
     """Print the vhc-monitor version."""
-    console.print(f"vhc-monitor v{__version__}")
+    typer.echo(f"vhc-monitor v{__version__}")
 
 
 @app.command()
