@@ -36,14 +36,22 @@ public static class LoggingSetup
             .Enrich.WithProperty("Application", "vhc-monitor");
 
         // File sink with daily rolling
+        // Serilog inserts the date before the extension (e.g. "app.log" → "app20260402.log").
+        // Rewrite the path so there's a dash separator: "app.log" → "app-.log" → "app-20260402.log".
         try
         {
             var logDir = Path.GetDirectoryName(Path.GetFullPath(logFile));
             if (!string.IsNullOrEmpty(logDir))
                 Directory.CreateDirectory(logDir);
 
+            var baseName = Path.GetFileNameWithoutExtension(logFile);
+            var ext = Path.GetExtension(logFile);
+            var rollingPath = Path.Combine(
+                Path.GetDirectoryName(logFile) ?? ".",
+                baseName + "-" + ext);
+
             logConfig = logConfig.WriteTo.File(
-                logFile,
+                rollingPath,
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: rotationKeep,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level,-8:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",

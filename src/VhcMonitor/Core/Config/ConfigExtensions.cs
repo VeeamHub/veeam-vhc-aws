@@ -88,6 +88,8 @@ public static class ConfigExtensions
     public static string GetApiString(this Dictionary<string, object> dict, string camelKey, string pascalKey, string defaultValue = "")
     {
         var val = dict.GetApi(camelKey, pascalKey, defaultValue);
+        if (val is IList<object> list)
+            return string.Join(", ", list);
         return val?.ToString() ?? defaultValue;
     }
 
