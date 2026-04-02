@@ -207,20 +207,26 @@ class RepoHealthMonitor(BaseMonitor):
             count = info["count"]
             count_suffix = f" ({count}x in last {lookback_hours}h)" if count > 1 else ""
 
+            error_detail = info["error_text"] or "check VBR console for details"
             if pattern_cat == "credential":
-                msg = f"Credential failure in {session_type}{count_suffix}: {info['error_text']}"
+                msg = f"Credential failure in {session_type}{count_suffix}: {error_detail}"
             elif pattern_cat in ("auth", "s3"):
-                msg = f"S3/auth failure in {session_type}{count_suffix}: {info['error_text']}"
+                msg = f"S3/auth failure in {session_type}{count_suffix}: {error_detail}"
             else:
-                detail = info["error_text"] or "check VBR console for details"
-                msg = f"{session_type} {result_status}{count_suffix}: {detail}"
+                msg = f"{session_type} {result_status}{count_suffix}: {error_detail}"
 
             findings.append(Finding(
                 severity=info["severity"],
                 resource=f"session:{info['session_name']}",
                 message=msg,
-                details={"session_type": session_type, "count": count,
-                          "error": info["error_text"]},
+                details={
+                    "session_type": session_type,
+                    "session_name": info["session_name"],
+                    "result": result_status,
+                    "count": count,
+                    "lookback_hours": lookback_hours,
+                    "error": info["error_text"],
+                },
             ))
 
             logger.info("Repo session issue: %s %s (%dx): %s",
