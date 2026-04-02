@@ -15,58 +15,30 @@ permissions:
 
 jobs:
   dependency-scan:
-    name: Dependency Audit
+    name: Vulnerable Package Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-dotnet@v4
         with:
-          python-version: '3.12'
+          dotnet-version: '10.x'
 
-      - name: Install pip-audit
-        run: pip install pip-audit
+      - name: Restore
+        run: dotnet restore src/VhcMonitor/VhcMonitor.csproj
 
-      - name: Generate dependency list
+      - name: Check for vulnerable packages
         run: |
-          pip install .
-          pip freeze --exclude vhc-monitor > requirements-audit.txt
-
-      - name: Run pip-audit
-        run: pip-audit --strict --desc -r requirements-audit.txt
-
-  bandit:
-    name: Bandit SAST
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install bandit
-        run: pip install bandit[toml]
-
-      - name: Run Bandit
-        run: bandit -r vhc_monitor/ -f json -o bandit-report.json --skip B105,B107,B404,B603,B607 || true
-
-      - name: Display results
-        if: always()
-        run: bandit -r vhc_monitor/ -f screen --skip B105,B107,B404,B603,B607
-
-      - name: Upload Bandit report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bandit-report
-          path: bandit-report.json
+          dotnet list src/VhcMonitor/VhcMonitor.csproj package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
+          cat vuln-report.txt
+          if grep -q "has the following vulnerable packages" vuln-report.txt; then
+            echo "::error::Vulnerable NuGet packages detected"
+            exit 1
+          fi
 
   codeql:
-    name: CodeQL
+    name: CodeQL (C#)
     runs-on: ubuntu-latest
-    # CodeQL requires GitHub Advanced Security — free on public repos,
-    # requires GHAS license on private. continue-on-error until repo is public.
     continue-on-error: true
     permissions:
       contents: read
@@ -75,10 +47,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: python
+          languages: csharp
+
+      - name: Build for CodeQL
+        run: dotnet build src/VhcMonitor/VhcMonitor.csproj -c Release --no-restore
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

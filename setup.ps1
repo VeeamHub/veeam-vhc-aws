@@ -595,3 +595,10 @@ Write-Host "  Manual run:   & '$exeFullPath' all --config '$configPath'" -Foregr
 Write-Host "  View logs:    Get-Content '$logPath' -Tail 50" -ForegroundColor Cyan
 Write-Host "  Edit config:  notepad '$configPath'" -ForegroundColor Cyan
 Write-Host ""
+
+# TODO: Add -Uninstall switch that removes scheduled tasks, deletes install dir, and
+#       optionally removes config/state/log files from C:\ProgramData\VHC with a prompt.
+#       (keep config/state by default so reinstall is seamless)
+
+# TODO: Send a notification (via configured output handlers) when uninstall completes,
+#       so monitoring recipients know alerting has stopped intentionally.

@@ -8,42 +8,51 @@ on:
 
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Test (.NET)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-dotnet@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          dotnet-version: '10.x'
 
-      - name: Install dependencies
-        run: pip install -e ".[dev]"
+      - name: Restore
+        run: dotnet restore src/VhcMonitor/VhcMonitor.csproj
 
-      - name: Run tests
-        run: python -m pytest tests/ -v
+      - name: Build
+        run: dotnet build src/VhcMonitor/VhcMonitor.csproj --no-restore -c Release
+
+      - name: Test
+        run: dotnet test tests/VhcMonitor.Tests/VhcMonitor.Tests.csproj --no-build -c Release -v normal
 
   build-exe:
-    name: Build & VT Scan
-    runs-on: windows-latest
+    name: Build win-x64 & VT Scan
+    runs-on: ubuntu-latest
     needs: test
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-dotnet@v4
         with:
-          python-version: '3.12'
+          dotnet-version: '10.x'
 
-      - name: Install dependencies
+      - name: Publish win-x64
         run: |
-          pip install .
-          pip install pyinstaller
+          dotnet publish src/VhcMonitor/VhcMonitor.csproj \
+            -c Release \
+            -r win-x64 \
+            --self-contained \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -o dist/win-x64 \
+            --nologo
 
-      - name: Build executable
-        run: pyinstaller vhc-monitor.spec --noconfirm
+      - name: Verify single-file output
+        run: |
+          ls -lh dist/win-x64/
+          test -f dist/win-x64/vhc-monitor.exe || (echo "ERROR: vhc-monitor.exe not found" && exit 1)
+          COUNT=$(ls dist/win-x64/ | wc -l)
+          echo "Output file count: $COUNT"
 
       - name: VirusTotal Scan
         if: env.VT_API_KEY != ''
@@ -51,21 +60,17 @@ jobs:
         env:
           VT_API_KEY: ${{ secrets.VT_API_KEY }}
         run: |
-          # Compute SHA256 locally — use this for the VT report URL
-          SHA256=$(sha256sum dist/vhc-monitor.exe | awk '{print $1}')
+          SHA256=$(sha256sum dist/win-x64/vhc-monitor.exe | awk '{print $1}')
           VT_URL="https://www.virustotal.com/gui/file/$SHA256"
           echo "VT report URL: $VT_URL"
 
-          # Submit file
-          echo "Submitting dist/vhc-monitor.exe to VirusTotal..."
           UPLOAD=$(curl -s --request POST \
             --url https://www.virustotal.com/api/v3/files \
             --header "x-apikey: $VT_API_KEY" \
-            --form file=@dist/vhc-monitor.exe)
+            --form file=@dist/win-x64/vhc-monitor.exe)
           ANALYSIS_ID=$(echo "$UPLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
           echo "Analysis ID: $ANALYSIS_ID"
 
-          # Poll until complete (up to 10 min, 30s intervals)
           for i in $(seq 1 20); do
             sleep 30
             RESULT=$(curl -s --request GET \
@@ -75,21 +80,19 @@ jobs:
             echo "[$i/20] Status: $STATUS"
             if [ "$STATUS" = "completed" ]; then
               MALICIOUS=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['attributes']['stats']['malicious'])")
-              SUSPICIOUS=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['attributes']['stats']['suspicious'])")
-              echo "Malicious: $MALICIOUS | Suspicious: $SUSPICIOUS"
-              echo "Report: $VT_URL"
+              echo "Malicious: $MALICIOUS | Report: $VT_URL"
               if [ "$MALICIOUS" -gt 5 ]; then
                 echo "::error::VirusTotal flagged $MALICIOUS engines as malicious (threshold: 5). Review: $VT_URL"
                 exit 1
               fi
-              echo "VT scan passed ($MALICIOUS malicious detections)."
+              echo "VT scan passed."
               exit 0
             fi
           done
           echo "::warning::VirusTotal analysis did not complete within 10 minutes."
 
-      - name: Upload executable artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vhc-monitor-windows
-          path: dist/vhc-monitor.exe
+          name: vhc-monitor-win-x64
+          path: dist/win-x64/vhc-monitor.exe

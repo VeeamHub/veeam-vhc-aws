@@ -12,7 +12,7 @@
   <a href="https://github.com/VeeamHub/veeam-vhc-monitor/actions/workflows/release.yml"><img src="https://github.com/VeeamHub/veeam-vhc-monitor/actions/workflows/release.yml/badge.svg" alt="Release"></a>
   <a href="https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/VeeamHub/veeam-vhc-monitor?label=Latest%20Release" alt="Latest Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/VeeamHub/veeam-vhc-monitor" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
 </p>
 
 <p align="center">
@@ -63,10 +63,10 @@ That's it. The monitor is now running on a schedule and will alert you when issu
 #### Option 2: From Source (any platform)
 
 ```bash
-# Requires Python 3.11+
-pip install .
-vhc-monitor setup              # Creates a config file interactively
-vhc-monitor all -c vhc-monitor.yaml   # Run all monitors
+# Requires .NET 10 SDK
+dotnet build src/VhcMonitor/VhcMonitor.csproj
+dotnet run --project src/VhcMonitor -- setup              # Creates a config file interactively
+dotnet run --project src/VhcMonitor -- all -c vhc-monitor.yaml   # Run all monitors
 ```
 
 #### Option 3: Docker
@@ -75,6 +75,8 @@ vhc-monitor all -c vhc-monitor.yaml   # Run all monitors
 docker build -t vhc-monitor .
 docker run -v /path/to/config.yaml:/config/config.yaml vhc-monitor
 ```
+
+> The Docker image uses the .NET 10 runtime.
 
 ### Usage
 
@@ -289,11 +291,9 @@ Remove-Item -Recurse -Force "$env:ProgramFiles\VHC"
 
 If you installed to a custom directory, replace the path accordingly.
 
-#### From Source (pip)
+#### From Source
 
 ```bash
-pip uninstall vhc-monitor -y
-
 # Remove config and logs
 rm -f ./vhc-monitor.yaml ./vhc-monitor.log ./vhc-monitor-state.json
 ```
@@ -307,19 +307,26 @@ docker rmi vhc-monitor
 ### Building from Source
 
 ```powershell
-# Build standalone Windows executable
+# Build Windows exe + zip bundle
 .\build.ps1
-# Output: dist\vhc-monitor.exe
+
+# Or just the exe, no zip
+.\build.ps1 -NoZip
+```
+
+```bash
+# Build for current platform
+./build.sh --local
+
+# Build all platforms (win-x64, linux-x64, osx-arm64, osx-x64)
+./build.sh
 ```
 
 ### Running Tests
 
 ```bash
-pip install -e ".[dev]"
-python -m pytest tests/ -v
+dotnet test tests/VhcMonitor.Tests/
 ```
-
-Tests use `respx` for HTTP mocking with fixtures in `tests/fixtures/`.
 
 ## ✍ Contributions
 

@@ -32,7 +32,6 @@ servers:
     password: ""
     api_version: "1.3-rev1"
     verify_ssl: true
-    # api_version: "1.1-rev2"  # VBR 12.3 and earlier — default is 1.3-rev1 for VBR 13
 
   - name: prod-vbaws
     type: vbaws

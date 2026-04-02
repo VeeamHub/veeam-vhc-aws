@@ -1,19 +1,50 @@
+# Python (archived — kept for reference branch)
 __pycache__/
 *.pyc
 *.egg-info/
 .venv/
-dist/
 build/
 .pytest_cache/
 
+# .NET build artifacts
+bin/
+obj/
+out/
+TestResults/
+
+# .NET publish output
+dist/
+
+# .NET user and IDE files
+.vs/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider / VS Code local settings
+.idea/
+.vscode/
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+
 # Config files with secrets
 vhc-monitor.yaml
+vhc-monitor-test.yaml
+*-test.yaml
 
 # Runtime artifacts
-*.log*
+*.log
+*.log.*
 *-state.json
+
+# Release bundles
+*.zip
 
 # Plans and AI
 Plans/*
 CLAUDE.md
-veeam-monitor.yaml
