@@ -128,6 +128,31 @@ output:
     deduplicate: true
 ```
 
+### Daily Summary
+
+VHC Monitor can send a daily health digest showing the complete status of all monitors — not just new issues. Unlike alert notifications (which only fire when something changes), the daily summary always sends at the configured time.
+
+**Windows Standalone:** During `setup.ps1`, you'll be prompted to enable the daily summary and choose a time (default 8:00 AM local). This creates a second Windows Scheduled Task named **VHC Monitor Daily Summary**.
+
+**Run on demand:**
+
+```powershell
+.\vhc-monitor.exe summary -c C:\ProgramData\VHC\vhc-monitor.yaml
+```
+
+**Config options:**
+
+```yaml
+daily_summary:
+  enabled: true   # set to false to disable
+  # output:       # optional: different handlers just for the summary
+  #   - type: webhook
+  #     url: https://ntfy.sh/my-veeam-daily
+  #     template: ntfy
+```
+
+The daily summary uses your configured output handlers (same as alerts) but bypasses deduplication — it always sends the full current state.
+
 ### Exit Codes
 
 | Code | Severity |
@@ -218,6 +243,37 @@ output:
     to_addrs: ["oncall@example.com"]
     min_severity: critical
 ```
+
+### Upgrading
+
+To upgrade without re-running the full setup wizard — your config, state, and logs in `C:\ProgramData\VHC\` are untouched.
+
+#### Windows Standalone (Recommended)
+
+1. Download the new zip bundle from the [latest release](https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest)
+2. Extract it
+3. Open PowerShell **as Administrator** in the extracted folder and run:
+
+```powershell
+.\setup.ps1 -Upgrade
+```
+
+That's it. The wizard will:
+- Swap in the new executable
+- Scan your config for any features added since your last install and offer to configure them (e.g., if you're missing `daily_summary`, it will ask if you'd like to set it up)
+
+#### Manual alternative
+
+If you prefer, just copy the new `vhc-monitor.exe` over the existing one:
+
+```powershell
+Copy-Item .\vhc-monitor.exe "$env:ProgramFiles\VHC\vhc-monitor.exe" -Force
+```
+
+> [!NOTE]
+> Your config (`C:\ProgramData\VHC\vhc-monitor.yaml`), alert state (`vhc-monitor-state.json`), and logs are stored separately and are never touched by an upgrade.
+
+---
 
 ### Uninstall
 

@@ -185,3 +185,15 @@ error_patterns:
     message: "Invalid credentials — check IAM access key or role permissions"
     category: credential
     source: vbaws
+
+# Daily summary — sends a complete status digest once per day
+# Schedule via setup.ps1 (creates a separate Windows scheduled task)
+# Or add a cron job running: vhc-monitor summary -c /path/to/config.yaml
+daily_summary:
+  enabled: true
+  # Optionally use different output handlers for the summary.
+  # If omitted, uses the same handlers defined in the output section above.
+  # output:
+  #   - type: webhook
+  #     url: https://ntfy.sh/my-veeam-daily
+  #     template: ntfy

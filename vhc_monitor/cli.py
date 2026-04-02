@@ -485,6 +485,45 @@ def run_all(
 
 
 @app.command()
+def summary(
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
+) -> None:
+    """Run all monitors and emit a full daily summary — all findings, no deduplication."""
+    try:
+        cfg, servers, pe, _, _ = _load_and_setup(config)
+    except Exception as e:
+        typer.echo(f"ERROR: Startup failed: {e}", err=True)
+        raise typer.Exit(3)
+
+    summary_cfg = cfg.get("daily_summary", {})
+    if not summary_cfg.get("enabled", True):
+        typer.echo("Daily summary is disabled in config.")
+        raise typer.Exit(0)
+
+    if not servers:
+        console.print("[yellow]No servers configured.[/yellow]")
+        raise typer.Exit(0)
+
+    results = _run_all_servers(servers, cfg, pe)
+    results = _cross_correlate(results)
+
+    # Mark all results as summary mode so handlers format accordingly
+    for result in results:
+        result.metadata["summary"] = True
+
+    # Use daily_summary.output if specified, else fall back to main output config
+    summary_output = summary_cfg.get("output")
+    if summary_output:
+        handlers = create_handlers({"output": summary_output})
+    else:
+        handlers = create_handlers(cfg)
+    dispatcher = OutputDispatcher(handlers)
+    dispatcher.emit(results)
+
+    raise typer.Exit(_worst_exit_code(results))
+
+
+@app.command()
 def serve(
     config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to config file"),
     port: int = typer.Option(9100, "--port", "-p", help="Prometheus HTTP server port"),

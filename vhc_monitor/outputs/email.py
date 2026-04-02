@@ -122,13 +122,15 @@ class EmailHandler(OutputHandler):
 
     def emit(self, results: list[MonitorResult]) -> None:
         """Send HTML email with monitor results if severity threshold is met."""
-        if not self._should_send(results):
+        is_summary = any(r.metadata.get("summary") for r in results)
+
+        if not is_summary and not self._should_send(results):
             return
 
         html = self._build_html(results)
 
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = "VHC Monitor Alert"
+        msg["Subject"] = "Daily VHC Monitor Summary" if is_summary else "VHC Monitor Alert"
         msg["From"] = self.from_addr
         msg["To"] = ", ".join(self.to_addrs)
 

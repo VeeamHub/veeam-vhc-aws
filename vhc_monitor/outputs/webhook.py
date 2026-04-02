@@ -1,6 +1,7 @@
 """Webhook output handler with templates for Slack, Teams, PagerDuty, ntfy, and generic."""
 
 import logging
+from datetime import datetime
 
 import httpx
 
@@ -257,24 +258,222 @@ class WebhookHandler(OutputHandler):
             "_ntfy_body": body,
         }
 
-    def emit(self, results: list[MonitorResult]) -> None:
-        """POST results to the webhook URL using the configured template."""
-        if not self._should_send(results):
-            return
+    def _format_ntfy_summary(self, results: list[MonitorResult]) -> dict:
+        """Format a daily summary for ntfy.sh."""
+        worst = Severity.OK
+        for result in results:
+            if _SEVERITY_ORDER.get(result.overall_severity, 0) > _SEVERITY_ORDER.get(worst, 0):
+                worst = result.overall_severity
 
-        formatters = {
-            "slack": self._format_slack,
-            "teams": self._format_teams,
-            "pagerduty": self._format_pagerduty,
-            "ntfy": self._format_ntfy,
-            "generic": self._format_generic,
+        ntfy_priority = {
+            Severity.OK: "low",
+            Severity.WARNING: "default",
+            Severity.CRITICAL: "high",
+            Severity.ERROR: "urgent",
+        }
+        ntfy_tags = {
+            Severity.OK: "white_check_mark",
+            Severity.WARNING: "warning",
+            Severity.CRITICAL: "rotating_light",
+            Severity.ERROR: "x",
         }
 
-        formatter = formatters.get(self.template, self._format_generic)
-        payload = formatter(results)
+        now = datetime.now()
+        date_str = f"{now.strftime('%B')} {now.day}, {now.year}"
+
+        issue_lines = []
+        healthy_monitors = []
+
+        for result in results:
+            if result.monitor.value == "cross_correlation":
+                continue
+
+            if result.overall_severity == Severity.OK:
+                label = f"{result.monitor.value} ({result.server})" if result.server else result.monitor.value
+                healthy_monitors.append(label)
+                continue
+
+            non_metric_findings = [
+                f for f in result.findings
+                if not f.metric_name and f.severity != Severity.OK
+            ]
+            for f in non_metric_findings:
+                resource = f.resource
+                if result.server and resource.startswith(f"[{result.server}] "):
+                    resource = resource[len(f"[{result.server}] "):]
+                icon = "🔴" if f.severity in (Severity.CRITICAL, Severity.ERROR) else "⚠️"
+                server_tag = f"[{result.server}] " if result.server else ""
+                issue_lines.append(f"{icon} {server_tag}{resource} — {f.message}")
+
+        lines = [f"**Daily Veeam Health Summary — {date_str}**", ""]
+
+        if issue_lines:
+            lines.append(f"**Issues ({len(issue_lines)}):**")
+            for line in issue_lines:
+                lines.append(line)
+        else:
+            lines.append("All monitors healthy")
+
+        if healthy_monitors:
+            lines.append("")
+            lines.append(f"**Healthy:** {', '.join(healthy_monitors)}")
+
+        body = "\n".join(lines).strip()
+        if len(body) > 3800:
+            body = body[:3800] + "\n... (truncated)"
+
+        return {
+            "_ntfy_headers": {
+                "Title": f"Daily Summary: {worst.value.upper()}",
+                "Priority": ntfy_priority.get(worst, "default"),
+                "Tags": ntfy_tags.get(worst, "bell"),
+                "Markdown": "yes",
+            },
+            "_ntfy_body": body,
+        }
+
+    def _format_slack_summary(self, results: list[MonitorResult]) -> dict:
+        """Format a daily summary for Slack."""
+        attachments = [{
+            "color": "#0076D7",
+            "blocks": [{
+                "type": "header",
+                "text": {"type": "plain_text", "text": "Daily VHC Monitor Summary"},
+            }],
+        }]
+
+        healthy_servers = []
+        for result in results:
+            if result.monitor.value == "cross_correlation":
+                continue
+
+            if result.overall_severity == Severity.OK:
+                label = f"{result.monitor.value} ({result.server})" if result.server else result.monitor.value
+                healthy_servers.append(label)
+                continue
+
+            color = _SEVERITY_COLORS.get(result.overall_severity, "#808080")
+            finding_lines = []
+            for f in result.findings:
+                if f.severity != Severity.OK and not f.metric_name:
+                    finding_lines.append(f"• [{f.severity.value.upper()}] {f.resource}: {f.message}")
+
+            if finding_lines:
+                server_label = f" ({result.server})" if result.server else ""
+                attachments.append({
+                    "color": color,
+                    "blocks": [{
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": (
+                                f"*{result.monitor.value}{server_label}*\n"
+                                + "\n".join(finding_lines)
+                            ),
+                        },
+                    }],
+                })
+
+        if healthy_servers:
+            attachments.append({
+                "color": "#36a64f",
+                "blocks": [{
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Healthy:* {', '.join(healthy_servers)}",
+                    },
+                }],
+            })
+
+        return {"attachments": attachments}
+
+    def _format_teams_summary(self, results: list[MonitorResult]) -> dict:
+        """Format a daily summary for Microsoft Teams."""
+        sections = []
+        overall_color = "#808080"
+        healthy_monitors = []
+
+        for result in results:
+            if result.monitor.value == "cross_correlation":
+                continue
+
+            if result.overall_severity == Severity.OK:
+                label = f"{result.monitor.value} ({result.server})" if result.server else result.monitor.value
+                healthy_monitors.append(label)
+                continue
+
+            overall_color = _SEVERITY_COLORS.get(result.overall_severity, overall_color)
+            facts = [
+                {"name": "Monitor", "value": result.monitor.value},
+                {"name": "Server", "value": result.server or "N/A"},
+                {"name": "Severity", "value": result.overall_severity.value.upper()},
+                {"name": "Findings", "value": str(len(result.findings))},
+            ]
+            sections.append({
+                "activityTitle": f"{result.monitor.value}",
+                "facts": facts,
+                "text": "\n".join(
+                    f"- [{f.severity.value.upper()}] {f.resource}: {f.message}"
+                    for f in result.findings
+                    if f.severity != Severity.OK and not f.metric_name
+                ),
+            })
+
+        if healthy_monitors:
+            sections.append({
+                "activityTitle": "Healthy Monitors",
+                "facts": [{"name": "Healthy monitors", "value": ", ".join(healthy_monitors)}],
+                "text": "",
+            })
+
+        return {
+            "@type": "MessageCard",
+            "@context": "http://schema.org/extensions",
+            "themeColor": overall_color.lstrip("#"),
+            "summary": "Daily VHC Monitor Summary",
+            "sections": sections,
+        }
+
+    def emit(self, results: list[MonitorResult]) -> None:
+        """POST results to the webhook URL using the configured template."""
+        is_summary = any(r.metadata.get("summary") for r in results)
+
+        if not is_summary and not self._should_send(results):
+            return
+
+        if is_summary:
+            summary_formatters = {
+                "ntfy": self._format_ntfy_summary,
+                "slack": self._format_slack_summary,
+                "teams": self._format_teams_summary,
+            }
+            formatter = summary_formatters.get(self.template)
+            if formatter:
+                payload = formatter(results)
+            else:
+                # pagerduty, generic: use existing formatters
+                formatters = {
+                    "pagerduty": self._format_pagerduty,
+                    "generic": self._format_generic,
+                }
+                formatter = formatters.get(self.template, self._format_generic)
+                payload = formatter(results)
+        else:
+            formatters = {
+                "slack": self._format_slack,
+                "teams": self._format_teams,
+                "pagerduty": self._format_pagerduty,
+                "ntfy": self._format_ntfy,
+                "generic": self._format_generic,
+            }
+
+            formatter = formatters.get(self.template, self._format_generic)
+            payload = formatter(results)
 
         # For ntfy with dedup: skip sending if there are no new alertable findings
-        if self.template == "ntfy" and self._deduplicate:
+        # (skip this check for summaries — always send)
+        if not is_summary and self.template == "ntfy" and self._deduplicate:
             has_new_alerts = any(
                 f.severity != Severity.OK
                 and not f.metric_name
