@@ -1,5 +1,6 @@
 # setup.ps1 - Sets up VHC Monitor on Windows
 # Usage: .\setup.ps1 -AlertUrl "https://ntfy.example.com/veeam-alerts"
+# Upgrade: .\setup.ps1 -Upgrade
 # Requires: vhc-monitor.exe in the same directory as this script, or in dist\
 
 param(
@@ -10,7 +11,16 @@ param(
     [int]$IntervalMinutes = 5,
 
     [Parameter(Mandatory=$false)]
-    [string]$InstallDir = "$env:ProgramFiles\VHC"
+    [string]$InstallDir = "$env:ProgramFiles\VHC",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$Upgrade,
+
+    [Parameter(Mandatory=$false)]
+    [string]$SummaryTime = "",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$NoSummary
 )
 
 Set-StrictMode -Version Latest
@@ -18,9 +28,123 @@ $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  VHC Monitor Setup" -ForegroundColor Cyan
+if ($Upgrade) {
+    Write-Host "  VHC Monitor Upgrade" -ForegroundColor Cyan
+} else {
+    Write-Host "  VHC Monitor Setup" -ForegroundColor Cyan
+}
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
+
+# --- UPGRADE MODE: swap exe + check for new/missing features ---
+if ($Upgrade) {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $exeCandidates = @(
+        (Join-Path $scriptDir "vhc-monitor.exe"),
+        (Join-Path $scriptDir "dist\vhc-monitor.exe")
+    )
+    $exeSource = $null
+    foreach ($candidate in $exeCandidates) {
+        if (Test-Path $candidate) { $exeSource = $candidate; break }
+    }
+    if (-not $exeSource) {
+        Write-Host "ERROR: vhc-monitor.exe not found next to this script." -ForegroundColor Red
+        exit 1
+    }
+
+    $exeDest = Join-Path $InstallDir "vhc-monitor.exe"
+    if (-not (Test-Path $InstallDir)) {
+        Write-Host "ERROR: Install dir $InstallDir not found. Run setup.ps1 without -Upgrade first." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Replacing $exeDest ..." -ForegroundColor Yellow
+    Copy-Item $exeSource $exeDest -Force
+    $newVersion = & $exeDest version 2>&1
+    Write-Host "  -> $newVersion" -ForegroundColor Green
+
+    # --- Feature gap detection ---
+    # For each new feature: check if the config has it, offer to configure if missing.
+    # To add a future feature check: follow the same pattern below.
+    Write-Host ""
+    Write-Host "Checking for new features..." -ForegroundColor Yellow
+
+    $configPath = Join-Path $InstallDir "vhc-monitor.yaml"
+    $anyUpdates = $false
+
+    if (Test-Path $configPath) {
+        $configText = Get-Content $configPath -Raw -Encoding UTF8
+
+        # ---- Feature: daily_summary ----
+        if ($configText -notmatch '(?m)^daily_summary:') {
+            Write-Host ""
+            Write-Host "  [NEW] Daily health summary is not configured." -ForegroundColor Cyan
+            Write-Host "        Sends a full status digest once per day (separate from alert notifications)." -ForegroundColor DarkGray
+            $dsChoice = Read-Host "  Set it up now? (y/n) [y]"
+            if ($dsChoice -ne "n") {
+                $dsTime = Read-Host "  Daily summary time (HH:MM, 24-hour local) [08:00]"
+                if (-not $dsTime) { $dsTime = "08:00" }
+
+                # Append daily_summary block to config (BOM-free UTF-8)
+                $dsBlock = "`r`n`r`ndaily_summary:`r`n  enabled: true`r`n"
+                [IO.File]::WriteAllText($configPath, $configText.TrimEnd() + $dsBlock, [System.Text.UTF8Encoding]::new($false))
+                Write-Host "  -> daily_summary added to config" -ForegroundColor Green
+
+                # Create the scheduled task
+                $dsTaskName = "VHC Monitor Daily Summary"
+                $dsAction = New-ScheduledTaskAction `
+                    -Execute $exeDest `
+                    -Argument "summary --config `"$configPath`"" `
+                    -WorkingDirectory $InstallDir
+                try {
+                    $dsTrigger = New-ScheduledTaskTrigger -Daily -At $dsTime
+                } catch {
+                    Write-Host "  WARNING: Invalid time '$dsTime', defaulting to 08:00" -ForegroundColor Yellow
+                    $dsTime = "08:00"
+                    $dsTrigger = New-ScheduledTaskTrigger -Daily -At $dsTime
+                }
+                $dsSettings = New-ScheduledTaskSettingsSet `
+                    -StartWhenAvailable -DontStopOnIdleEnd `
+                    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+                    -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+                $dsPrincipal = New-ScheduledTaskPrincipal `
+                    -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+
+                if (Get-ScheduledTask -TaskName $dsTaskName -ErrorAction SilentlyContinue) {
+                    Unregister-ScheduledTask -TaskName $dsTaskName -Confirm:$false
+                }
+                Register-ScheduledTask `
+                    -TaskName $dsTaskName -Action $dsAction -Trigger $dsTrigger `
+                    -Settings $dsSettings -Principal $dsPrincipal `
+                    -Description "Daily VHC Monitor health summary at $dsTime" | Out-Null
+
+                Write-Host "  -> Scheduled task '$dsTaskName' created (daily at $dsTime)" -ForegroundColor Green
+                $anyUpdates = $true
+            } else {
+                Write-Host "  -> Skipped. Enable later by adding 'daily_summary:' to $configPath" -ForegroundColor DarkGray
+            }
+        } else {
+            Write-Host "  daily_summary: already configured" -ForegroundColor DarkGray
+        }
+
+        # ---- Add future feature checks here ----
+
+    } else {
+        Write-Host "  Config not found at $configPath — skipping feature check." -ForegroundColor Yellow
+        Write-Host "  Run setup.ps1 without -Upgrade to do a fresh install." -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+    if ($anyUpdates) {
+        Write-Host "Upgrade complete. New features configured." -ForegroundColor Green
+    } else {
+        Write-Host "Upgrade complete. All features already up to date." -ForegroundColor Green
+    }
+    Write-Host "Scheduled task will use the new version on its next run." -ForegroundColor Green
+    Write-Host "Manual run: & '$exeDest' all --config '$configPath'" -ForegroundColor Cyan
+    Write-Host ""
+    exit 0
+}
 
 # --- 1. Locate and copy vhc-monitor.exe ---
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -262,6 +386,26 @@ $toList
 
 $outputBlock = Add-NotificationBlock $outputBlock
 
+# --- Daily summary preference ---
+$setupSummary = $true
+$summaryTimeVal = "08:00"
+if ($NoSummary) {
+    $setupSummary = $false
+} else {
+    if (-not $SummaryTime) {
+        Write-Host ""
+        $summaryChoice = Read-Host "  Enable daily health summary? A full status report sent once per day (y/n) [y]"
+        if ($summaryChoice -eq "n") {
+            $setupSummary = $false
+        } else {
+            $summaryInput = Read-Host "  Daily summary time (HH:MM, 24-hour local) [08:00]"
+            if ($summaryInput) { $summaryTimeVal = $summaryInput }
+        }
+    } else {
+        $summaryTimeVal = $SummaryTime
+    }
+}
+
 # Logs and state go in ProgramData so non-elevated manual runs can also write
 $dataDir = Join-Path $env:ProgramData "VHC"
 if (-not (Test-Path $dataDir)) {
@@ -331,6 +475,9 @@ error_patterns:
     severity: critical
     message: "Invalid credentials"
     category: credential
+
+daily_summary:
+  enabled: $($setupSummary.ToString().ToLower())
 "@
 
 # Use WriteAllText to avoid UTF-8 BOM that PowerShell 5.1's Out-File adds.
@@ -383,6 +530,38 @@ Register-ScheduledTask `
 
 Write-Host "  -> Scheduled task '$taskName' created (every $IntervalMinutes min)" -ForegroundColor Green
 
+# --- 3b. Daily summary scheduled task ---
+if ($setupSummary) {
+    $summaryTaskName = "VHC Monitor Daily Summary"
+    $summaryAction = New-ScheduledTaskAction `
+        -Execute $exeFullPath `
+        -Argument "summary --config `"$configPath`"" `
+        -WorkingDirectory $InstallDir
+
+    try {
+        $summaryTrigger = New-ScheduledTaskTrigger -Daily -At $summaryTimeVal
+    } catch {
+        Write-Host "  WARNING: Invalid time '$summaryTimeVal', defaulting to 08:00" -ForegroundColor Yellow
+        $summaryTimeVal = "08:00"
+        $summaryTrigger = New-ScheduledTaskTrigger -Daily -At $summaryTimeVal
+    }
+
+    if (Get-ScheduledTask -TaskName $summaryTaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $summaryTaskName -Confirm:$false
+        Write-Host "  -> Removed existing '$summaryTaskName' task" -ForegroundColor Yellow
+    }
+
+    Register-ScheduledTask `
+        -TaskName $summaryTaskName `
+        -Action $summaryAction `
+        -Trigger $summaryTrigger `
+        -Settings $taskSettings `
+        -Principal $taskPrincipal `
+        -Description "Daily VHC Monitor health summary at $summaryTimeVal" | Out-Null
+
+    Write-Host "  -> Daily summary task '$summaryTaskName' created (daily at $summaryTimeVal)" -ForegroundColor Green
+}
+
 # --- 4. Run once to test ---
 Write-Host ""
 Write-Host "[4/5] Running initial test..." -ForegroundColor Yellow
@@ -405,6 +584,9 @@ Write-Host "  Install dir:  $InstallDir" -ForegroundColor White
 Write-Host "  Config:       $configPath" -ForegroundColor White
 Write-Host "  Log file:     $logPath" -ForegroundColor White
 Write-Host "  Schedule:     Every $IntervalMinutes minutes" -ForegroundColor White
+if ($setupSummary) {
+    Write-Host "  Daily summary: $summaryTimeVal" -ForegroundColor White
+}
 if ($AlertUrl) {
     Write-Host "  Alerts:       $AlertUrl" -ForegroundColor White
 }
