@@ -146,8 +146,14 @@ if ($Upgrade) {
     exit 0
 }
 
-# --- 1. Locate and copy vhc-monitor.exe ---
+# --- 0. Unblock all files in the script directory ---
+# Files downloaded from the internet are marked with Zone.Identifier which can
+# cause SmartScreen / Defender to block execution. Unblock everything up front.
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Get-ChildItem -Path $scriptDir -File | ForEach-Object { Unblock-File -Path $_.FullName }
+Write-Host "[0/5] Unblocked files in $scriptDir" -ForegroundColor Green
+
+# --- 1. Locate and copy vhc-monitor.exe ---
 $exeCandidates = @(
     (Join-Path $scriptDir "vhc-monitor.exe"),
     (Join-Path $scriptDir "dist\vhc-monitor.exe")
