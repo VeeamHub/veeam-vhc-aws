@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh - Build vhc-monitor standalone executables
+# build.sh - Build veeam-vhc-aws standalone executables
 # Usage:
 #   ./build.sh                  # Build all platforms
 #   ./build.sh win-x64          # Build one platform
@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-PROJECT="src/VhcMonitor/VhcMonitor.csproj"
+PROJECT="src/VeeamVhcAws/VeeamVhcAws.csproj"
 DIST="dist"
 VERSION=$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' "$PROJECT" | tr -d '[:space:]')
 
@@ -39,7 +39,7 @@ elif [ ${#TARGETS[@]} -eq 0 ]; then
 fi
 
 echo ""
-echo "=== VHC Monitor Build v$VERSION ==="
+echo "=== Veeam VHC AWS Monitor Build v$VERSION ==="
 echo ""
 
 rm -rf "$DIST"
@@ -49,8 +49,8 @@ FAILED=()
 
 for RID in "${TARGETS[@]}"; do
     OUT="$DIST/$RID"
-    EXE="$OUT/vhc-monitor"
-    [ "$RID" = "win-x64" ] && EXE="$OUT/vhc-monitor.exe"
+    EXE="$OUT/veeam-vhc-aws"
+    [ "$RID" = "win-x64" ] && EXE="$OUT/veeam-vhc-aws.exe"
 
     echo "Building $RID..."
 
@@ -75,8 +75,8 @@ echo ""
 echo "=== Build Summary ==="
 for RID in "${TARGETS[@]}"; do
     OUT="$DIST/$RID"
-    EXE="$OUT/vhc-monitor"
-    [ "$RID" = "win-x64" ] && EXE="$OUT/vhc-monitor.exe"
+    EXE="$OUT/veeam-vhc-aws"
+    [ "$RID" = "win-x64" ] && EXE="$OUT/veeam-vhc-aws.exe"
     if [ -f "$EXE" ]; then
         echo "  $RID  OK  $EXE"
     else

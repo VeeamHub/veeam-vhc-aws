@@ -20,8 +20,8 @@ jobs:
 
       - name: Restore & Test
         run: |
-          dotnet restore src/VhcMonitor/VhcMonitor.csproj
-          dotnet test tests/VhcMonitor.Tests/VhcMonitor.Tests.csproj -c Release -v normal
+          dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
+          dotnet test tests/VeeamVhcAws.Tests/VeeamVhcAws.Tests.csproj -c Release -v normal
 
   security:
     name: Security Gate
@@ -34,11 +34,11 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Restore
-        run: dotnet restore src/VhcMonitor/VhcMonitor.csproj
+        run: dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
 
       - name: Vulnerable package check
         run: |
-          dotnet list src/VhcMonitor/VhcMonitor.csproj package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
+          dotnet list src/VeeamVhcAws/VeeamVhcAws.csproj package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
           if grep -q "has the following vulnerable packages" vuln-report.txt; then
             echo "::error::Vulnerable NuGet packages detected — review vuln-report.txt"
             exit 1
@@ -58,7 +58,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          BASE=$(grep -oP '(?<=<Version>)[^<]+' src/VhcMonitor/VhcMonitor.csproj)
+          BASE=$(grep -oP '(?<=<Version>)[^<]+' src/VeeamVhcAws/VeeamVhcAws.csproj)
           VERSION="${BASE}.${GITHUB_RUN_NUMBER}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
@@ -66,7 +66,7 @@ jobs:
 
       - name: Publish win-x64
         run: |
-          dotnet publish src/VhcMonitor/VhcMonitor.csproj \
+          dotnet publish src/VeeamVhcAws/VeeamVhcAws.csproj \
             -c Release \
             -r win-x64 \
             --self-contained \
@@ -78,7 +78,7 @@ jobs:
       - name: Verify single-file output
         run: |
           ls -lh dist/win-x64/
-          test -f dist/win-x64/vhc-monitor.exe
+          test -f dist/win-x64/veeam-vhc-aws.exe
           COUNT=$(ls dist/win-x64/ | wc -l)
           echo "Output file count: $COUNT (expected: 1)"
           [ "$COUNT" -eq 1 ] || echo "::warning::More than 1 file in publish output"
@@ -86,11 +86,11 @@ jobs:
       - name: Bundle release zip
         run: |
           mkdir -p release-bundle
-          cp dist/win-x64/vhc-monitor.exe release-bundle/
+          cp dist/win-x64/veeam-vhc-aws.exe release-bundle/
           cp setup.ps1 release-bundle/
           cp config/example.yaml release-bundle/
           cat > release-bundle/README.txt << 'EOF'
-          vhc-monitor — Veeam Health Check Monitor
+          veeam-vhc-aws — Veeam VHC AWS Monitor
           =========================================
 
           Quick Start
@@ -99,22 +99,22 @@ jobs:
              (Configures servers, notifications, and creates a scheduled task)
 
           2. Or run manually:
-             .\vhc-monitor.exe all -c vhc-monitor.yaml
+             .\veeam-vhc-aws.exe all -c veeam-vhc-aws.yaml
 
           Commands
           --------
-          .\vhc-monitor.exe setup                        Interactive config wizard
-          .\vhc-monitor.exe all -c vhc-monitor.yaml      Run all monitors
-          .\vhc-monitor.exe summary -c vhc-monitor.yaml  Daily summary
-          .\vhc-monitor.exe test-connection -c config    Test server connectivity
-          .\vhc-monitor.exe serve -c config -p 9100      Prometheus metrics server
-          .\vhc-monitor.exe --help                       Show all commands
+          .\veeam-vhc-aws.exe setup                        Interactive config wizard
+          .\veeam-vhc-aws.exe all -c veeam-vhc-aws.yaml      Run all monitors
+          .\veeam-vhc-aws.exe summary -c veeam-vhc-aws.yaml  Daily summary
+          .\veeam-vhc-aws.exe test-connection -c config    Test server connectivity
+          .\veeam-vhc-aws.exe serve -c config -p 9100      Prometheus metrics server
+          .\veeam-vhc-aws.exe --help                       Show all commands
 
-          Docs: https://github.com/VeeamHub/veeam-vhc-monitor
+          Docs: https://github.com/VeeamHub/veeam-veeam-vhc-aws
           EOF
-          zip -j "vhc-monitor-${{ steps.version.outputs.tag }}-windows.zip" release-bundle/*
+          zip -j "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip" release-bundle/*
           echo "--- Zip contents ---"
-          unzip -l "vhc-monitor-${{ steps.version.outputs.tag }}-windows.zip"
+          unzip -l "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip"
 
       - name: VirusTotal Scan
         id: virustotal
@@ -123,7 +123,7 @@ jobs:
         env:
           VT_API_KEY: ${{ secrets.VT_API_KEY }}
         run: |
-          SHA256=$(sha256sum dist/win-x64/vhc-monitor.exe | awk '{print $1}')
+          SHA256=$(sha256sum dist/win-x64/veeam-vhc-aws.exe | awk '{print $1}')
           VT_URL="https://www.virustotal.com/gui/file/$SHA256"
           echo "vt_url=$VT_URL" >> "$GITHUB_OUTPUT"
           echo "VT report URL: $VT_URL"
@@ -131,7 +131,7 @@ jobs:
           UPLOAD=$(curl -s --request POST \
             --url https://www.virustotal.com/api/v3/files \
             --header "x-apikey: $VT_API_KEY" \
-            --form file=@dist/win-x64/vhc-monitor.exe)
+            --form file=@dist/win-x64/veeam-vhc-aws.exe)
           ANALYSIS_ID=$(echo "$UPLOAD" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
           echo "Analysis ID: $ANALYSIS_ID"
 
@@ -161,8 +161,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
-            "vhc-monitor-${{ steps.version.outputs.tag }}-windows.zip" \
-            --title "vhc-monitor ${{ steps.version.outputs.tag }}" \
+            "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip" \
+            --title "veeam-vhc-aws ${{ steps.version.outputs.tag }}" \
             --generate-notes
 
           VT_URL="${{ steps.virustotal.outputs.vt_url }}"

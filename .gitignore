@@ -14,6 +14,7 @@ TestResults/
 
 # .NET publish output
 dist/
+publish/
 
 # .NET user and IDE files
 .vs/
@@ -33,8 +34,8 @@ dist/
 packages/
 
 # Config files with secrets
-vhc-monitor.yaml
-vhc-monitor-test.yaml
+veeam-vhc-aws.yaml
+veeam-vhc-aws-test.yaml
 *-test.yaml
 
 # Runtime artifacts

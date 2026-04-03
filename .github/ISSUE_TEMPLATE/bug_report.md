@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a problem with vhc-monitor
+about: Report a problem with veeam-vhc-aws
 title: ''
 labels: bug
 assignees: ''
@@ -22,7 +22,7 @@ A clear and concise description of what you expected to happen.
 **Environment:**
  - OS: [e.g. Windows Server 2022, Ubuntu 22.04]
  - Python version: [e.g. 3.12, or standalone exe]
- - vhc-monitor version: [e.g. 0.2.0]
+ - veeam-vhc-aws version: [e.g. 0.2.0]
  - VBR version: [e.g. 12.3]
  - VBAWS version: [if applicable]
 

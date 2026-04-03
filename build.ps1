@@ -1,4 +1,4 @@
-# build.ps1 - Build vhc-monitor for Windows (win-x64)
+# build.ps1 - Build veeam-vhc-aws for Windows (win-x64)
 # Usage:
 #   .\build.ps1           # Build + package zip
 #   .\build.ps1 -NoZip    # Build exe only, skip zip
@@ -12,13 +12,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$ProjectPath = "src\VhcMonitor\VhcMonitor.csproj"
+$ProjectPath = "src\VeeamVhcAws\VeeamVhcAws.csproj"
 $OutDir      = "dist\win-x64"
-$ExePath     = "$OutDir\vhc-monitor.exe"
+$ExePath     = "$OutDir\veeam-vhc-aws.exe"
 $Version     = (Select-String '<Version>(.*)</Version>' $ProjectPath | ForEach-Object { $_.Matches.Groups[1].Value })
 
 Write-Host ""
-Write-Host "=== VHC Monitor Build v$Version (win-x64) ===" -ForegroundColor Cyan
+Write-Host "=== Veeam VHC AWS Monitor Build v$Version (win-x64) ===" -ForegroundColor Cyan
 Write-Host ""
 
 if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
@@ -61,7 +61,7 @@ if ($NoZip) {
 }
 
 # --- Package zip bundle ---
-$ZipName = "dist\vhc-monitor-v$Version-windows.zip"
+$ZipName = "dist\veeam-vhc-aws-v$Version-windows.zip"
 Write-Host ""
 Write-Host "Packaging -> $ZipName" -ForegroundColor Yellow
 
@@ -72,7 +72,7 @@ Copy-Item "setup.ps1"             $tmpDir
 Copy-Item "config\example.yaml"   $tmpDir
 
 @"
-vhc-monitor — Veeam Health Check Monitor
+veeam-vhc-aws — Veeam VHC AWS Monitor
 =========================================
 
 Quick Start
@@ -81,18 +81,18 @@ Quick Start
    (Configures servers, notifications, and creates a scheduled task)
 
 2. Or run manually:
-   .\vhc-monitor.exe all -c vhc-monitor.yaml
+   .\veeam-vhc-aws.exe all -c veeam-vhc-aws.yaml
 
 Commands
 --------
-.\vhc-monitor.exe setup                        Interactive config wizard
-.\vhc-monitor.exe all -c vhc-monitor.yaml      Run all monitors
-.\vhc-monitor.exe summary -c vhc-monitor.yaml  Daily summary
-.\vhc-monitor.exe test-connection -c config    Test server connectivity
-.\vhc-monitor.exe serve -c config -p 9100      Prometheus metrics server
-.\vhc-monitor.exe --help                       Show all commands
+.\veeam-vhc-aws.exe setup                        Interactive config wizard
+.\veeam-vhc-aws.exe all -c veeam-vhc-aws.yaml      Run all monitors
+.\veeam-vhc-aws.exe summary -c veeam-vhc-aws.yaml  Daily summary
+.\veeam-vhc-aws.exe test-connection -c config    Test server connectivity
+.\veeam-vhc-aws.exe serve -c config -p 9100      Prometheus metrics server
+.\veeam-vhc-aws.exe --help                       Show all commands
 
-Docs: https://github.com/VeeamHub/veeam-vhc-monitor
+Docs: https://github.com/VeeamHub/veeam-veeam-vhc-aws
 "@ | Out-File -FilePath "$tmpDir\README.txt" -Encoding utf8NoBOM
 
 Compress-Archive -Path "$tmpDir\*" -DestinationPath $ZipName -Force
@@ -106,7 +106,7 @@ Write-Host "  Exe: $ExePath ($sizeMB MB)" -ForegroundColor White
 Write-Host "  Zip: $ZipName ($zipMB MB)" -ForegroundColor White
 Write-Host ""
 Write-Host "  Zip contents:" -ForegroundColor Cyan
-Write-Host "    vhc-monitor.exe   <- the monitor" -ForegroundColor White
+Write-Host "    veeam-vhc-aws.exe   <- the monitor" -ForegroundColor White
 Write-Host "    setup.ps1         <- run as admin to install" -ForegroundColor White
 Write-Host "    example.yaml      <- config reference" -ForegroundColor White
 Write-Host "    README.txt        <- quick start" -ForegroundColor White

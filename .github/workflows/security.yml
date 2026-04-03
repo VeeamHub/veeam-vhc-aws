@@ -25,11 +25,11 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Restore
-        run: dotnet restore src/VhcMonitor/VhcMonitor.csproj
+        run: dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
 
       - name: Check for vulnerable packages
         run: |
-          dotnet list src/VhcMonitor/VhcMonitor.csproj package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
+          dotnet list src/VeeamVhcAws/VeeamVhcAws.csproj package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
           cat vuln-report.txt
           if grep -q "has the following vulnerable packages" vuln-report.txt; then
             echo "::error::Vulnerable NuGet packages detected"
@@ -57,7 +57,7 @@ jobs:
           languages: csharp
 
       - name: Build for CodeQL
-        run: dotnet build src/VhcMonitor/VhcMonitor.csproj -c Release --no-restore
+        run: dotnet build src/VeeamVhcAws/VeeamVhcAws.csproj -c Release --no-restore
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

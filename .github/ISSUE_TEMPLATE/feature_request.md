@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea for vhc-monitor
+about: Suggest an idea for veeam-vhc-aws
 title: ''
 labels: enhancement
 assignees: ''

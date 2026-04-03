@@ -1,7 +1,7 @@
-# setup.ps1 - Sets up VHC Monitor on Windows
+# setup.ps1 - Sets up Veeam VHC AWS Monitor on Windows
 # Usage: .\setup.ps1 -AlertUrl "https://ntfy.example.com/veeam-alerts"
 # Upgrade: .\setup.ps1 -Upgrade
-# Requires: vhc-monitor.exe in the same directory as this script, or in dist\
+# Requires: veeam-vhc-aws.exe in the same directory as this script, or in dist\
 
 param(
     [Parameter(Mandatory=$false)]
@@ -29,9 +29,9 @@ $ErrorActionPreference = "Stop"
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 if ($Upgrade) {
-    Write-Host "  VHC Monitor Upgrade" -ForegroundColor Cyan
+    Write-Host "  Veeam VHC AWS Monitor Upgrade" -ForegroundColor Cyan
 } else {
-    Write-Host "  VHC Monitor Setup" -ForegroundColor Cyan
+    Write-Host "  Veeam VHC AWS Monitor Setup" -ForegroundColor Cyan
 }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -40,19 +40,19 @@ Write-Host ""
 if ($Upgrade) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $exeCandidates = @(
-        (Join-Path $scriptDir "vhc-monitor.exe"),
-        (Join-Path $scriptDir "dist\vhc-monitor.exe")
+        (Join-Path $scriptDir "veeam-vhc-aws.exe"),
+        (Join-Path $scriptDir "dist\veeam-vhc-aws.exe")
     )
     $exeSource = $null
     foreach ($candidate in $exeCandidates) {
         if (Test-Path $candidate) { $exeSource = $candidate; break }
     }
     if (-not $exeSource) {
-        Write-Host "ERROR: vhc-monitor.exe not found next to this script." -ForegroundColor Red
+        Write-Host "ERROR: veeam-vhc-aws.exe not found next to this script." -ForegroundColor Red
         exit 1
     }
 
-    $exeDest = Join-Path $InstallDir "vhc-monitor.exe"
+    $exeDest = Join-Path $InstallDir "veeam-vhc-aws.exe"
     if (-not (Test-Path $InstallDir)) {
         Write-Host "ERROR: Install dir $InstallDir not found. Run setup.ps1 without -Upgrade first." -ForegroundColor Red
         exit 1
@@ -69,7 +69,7 @@ if ($Upgrade) {
     Write-Host ""
     Write-Host "Checking for new features..." -ForegroundColor Yellow
 
-    $configPath = Join-Path $InstallDir "vhc-monitor.yaml"
+    $configPath = Join-Path $InstallDir "veeam-vhc-aws.yaml"
     $anyUpdates = $false
 
     if (Test-Path $configPath) {
@@ -91,7 +91,7 @@ if ($Upgrade) {
                 Write-Host "  -> daily_summary added to config" -ForegroundColor Green
 
                 # Create the scheduled task
-                $dsTaskName = "VHC Monitor Daily Summary"
+                $dsTaskName = "Veeam VHC AWS Monitor Daily Summary"
                 $dsAction = New-ScheduledTaskAction `
                     -Execute $exeDest `
                     -Argument "summary --config `"$configPath`"" `
@@ -116,7 +116,7 @@ if ($Upgrade) {
                 Register-ScheduledTask `
                     -TaskName $dsTaskName -Action $dsAction -Trigger $dsTrigger `
                     -Settings $dsSettings -Principal $dsPrincipal `
-                    -Description "Daily VHC Monitor health summary at $dsTime" | Out-Null
+                    -Description "Daily Veeam VHC AWS Monitor health summary at $dsTime" | Out-Null
 
                 Write-Host "  -> Scheduled task '$dsTaskName' created (daily at $dsTime)" -ForegroundColor Green
                 $anyUpdates = $true
@@ -153,10 +153,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Get-ChildItem -Path $scriptDir -File | ForEach-Object { Unblock-File -Path $_.FullName }
 Write-Host "[0/5] Unblocked files in $scriptDir" -ForegroundColor Green
 
-# --- 1. Locate and copy vhc-monitor.exe ---
+# --- 1. Locate and copy veeam-vhc-aws.exe ---
 $exeCandidates = @(
-    (Join-Path $scriptDir "vhc-monitor.exe"),
-    (Join-Path $scriptDir "dist\vhc-monitor.exe")
+    (Join-Path $scriptDir "veeam-vhc-aws.exe"),
+    (Join-Path $scriptDir "dist\veeam-vhc-aws.exe")
 )
 
 $exeSource = $null
@@ -168,24 +168,24 @@ foreach ($candidate in $exeCandidates) {
 }
 
 if (-not $exeSource) {
-    Write-Host "ERROR: vhc-monitor.exe not found." -ForegroundColor Red
-    Write-Host "Place it next to this script or in dist\vhc-monitor.exe" -ForegroundColor Red
+    Write-Host "ERROR: veeam-vhc-aws.exe not found." -ForegroundColor Red
+    Write-Host "Place it next to this script or in dist\veeam-vhc-aws.exe" -ForegroundColor Red
     Write-Host "Build it first with: .\build.ps1" -ForegroundColor Yellow
     exit 1
 }
 
-Write-Host "[1/5] Copying vhc-monitor.exe to $InstallDir" -ForegroundColor Yellow
+Write-Host "[1/5] Copying veeam-vhc-aws.exe to $InstallDir" -ForegroundColor Yellow
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
-Copy-Item $exeSource (Join-Path $InstallDir "vhc-monitor.exe") -Force
-Write-Host "  -> Copied to $InstallDir\vhc-monitor.exe" -ForegroundColor Green
+Copy-Item $exeSource (Join-Path $InstallDir "veeam-vhc-aws.exe") -Force
+Write-Host "  -> Copied to $InstallDir\veeam-vhc-aws.exe" -ForegroundColor Green
 
 # --- 2. Generate config from user input ---
 Write-Host ""
 Write-Host "[2/5] Configuring monitoring targets" -ForegroundColor Yellow
 
-$configPath = Join-Path $InstallDir "vhc-monitor.yaml"
+$configPath = Join-Path $InstallDir "veeam-vhc-aws.yaml"
 
 # Prompt for VBR server
 $vbrUrl = Read-Host "  VBR server URL (e.g. https://vbr-server:9419, or blank to skip)"
@@ -419,11 +419,11 @@ if (-not (Test-Path $dataDir)) {
     # Grant Users modify access so non-elevated runs can write logs
     icacls $dataDir /grant "Users:(OI)(CI)M" | Out-Null
 }
-$logPath = Join-Path $dataDir "vhc-monitor.log"
-$statePath = Join-Path $dataDir "vhc-monitor-state.json"
+$logPath = Join-Path $dataDir "veeam-vhc-aws.log"
+$statePath = Join-Path $dataDir "veeam-vhc-aws-state.json"
 
 $configContent = @"
-# VHC Monitor configuration
+# Veeam VHC AWS Monitor configuration
 # Generated by setup.ps1 on $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 
 global:
@@ -495,8 +495,8 @@ Write-Host "  -> Config written to $configPath" -ForegroundColor Green
 Write-Host ""
 Write-Host "[3/5] Creating scheduled task" -ForegroundColor Yellow
 
-$taskName = "VHC Monitor"
-$exeFullPath = Join-Path $InstallDir "vhc-monitor.exe"
+$taskName = "Veeam VHC AWS Monitor"
+$exeFullPath = Join-Path $InstallDir "veeam-vhc-aws.exe"
 $taskAction = New-ScheduledTaskAction `
     -Execute $exeFullPath `
     -Argument "all --config `"$configPath`"" `
@@ -538,7 +538,7 @@ Write-Host "  -> Scheduled task '$taskName' created (every $IntervalMinutes min)
 
 # --- 3b. Daily summary scheduled task ---
 if ($setupSummary) {
-    $summaryTaskName = "VHC Monitor Daily Summary"
+    $summaryTaskName = "Veeam VHC AWS Monitor Daily Summary"
     $summaryAction = New-ScheduledTaskAction `
         -Execute $exeFullPath `
         -Argument "summary --config `"$configPath`"" `
@@ -563,7 +563,7 @@ if ($setupSummary) {
         -Trigger $summaryTrigger `
         -Settings $taskSettings `
         -Principal $taskPrincipal `
-        -Description "Daily VHC Monitor health summary at $summaryTimeVal" | Out-Null
+        -Description "Daily Veeam VHC AWS Monitor health summary at $summaryTimeVal" | Out-Null
 
     Write-Host "  -> Daily summary task '$summaryTaskName' created (daily at $summaryTimeVal)" -ForegroundColor Green
 }

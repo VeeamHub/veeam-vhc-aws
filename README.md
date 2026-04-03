@@ -2,29 +2,29 @@
   <img src="https://raw.githubusercontent.com/VeeamHub/veeam-healthcheck/dev/docs/images/health-check-icon.png" alt="Veeam Health Check" width="100">
 </p>
 
-<h1 align="center">VHC Monitor</h1>
+<h1 align="center">Veeam VHC AWS Monitor</h1>
 
 <p align="center">
   <strong>Continuous monitoring and alerting for your Veeam backup infrastructure.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/actions/workflows/release.yml"><img src="https://github.com/VeeamHub/veeam-vhc-monitor/actions/workflows/release.yml/badge.svg" alt="Release"></a>
-  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest"><img src="https://img.shields.io/github/v/release/VeeamHub/veeam-vhc-monitor?label=Latest%20Release" alt="Latest Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/VeeamHub/veeam-vhc-monitor" alt="License: MIT"></a>
+  <a href="https://github.com/VeeamHub/veeam-vhc-aws/actions/workflows/release.yml"><img src="https://github.com/VeeamHub/veeam-vhc-aws/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+  <a href="https://github.com/VeeamHub/veeam-vhc-aws/releases/latest"><img src="https://img.shields.io/github/v/release/VeeamHub/veeam-vhc-aws?label=Latest%20Release" alt="Latest Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/VeeamHub/veeam-vhc-aws" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
 </p>
 
 <p align="center">
-  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest"><strong>Download Latest Release</strong></a> &nbsp;&middot;&nbsp;
+  <a href="https://github.com/VeeamHub/veeam-vhc-aws/releases/latest"><strong>Download Latest Release</strong></a> &nbsp;&middot;&nbsp;
   <a href="https://github.com/VeeamHub/veeam-healthcheck"><strong>Veeam Health Check</strong></a> &nbsp;&middot;&nbsp;
-  <a href="https://github.com/VeeamHub/veeam-vhc-monitor/issues/new/choose"><strong>Report an Issue</strong></a>
+  <a href="https://github.com/VeeamHub/veeam-vhc-aws/issues/new/choose"><strong>Report an Issue</strong></a>
 </p>
 
 ---
 
 > [!NOTE]
-> VHC Monitor is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, VHC Monitor runs continuously and alerts you the moment something goes wrong.
+> Veeam VHC AWS Monitor is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, Veeam VHC AWS Monitor runs continuously and alerts you the moment something goes wrong.
 
 > This is a community-supported tool and is not an officially supported Veeam product.
 
@@ -44,7 +44,7 @@
 
 #### Option 1: Windows Standalone (Recommended)
 
-1. Download the **zip bundle** from the [latest release](https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest)
+1. Download the **zip bundle** from the [latest release](https://github.com/VeeamHub/veeam-vhc-aws/releases/latest)
 2. Extract to a folder (e.g., your Desktop or `C:\VHC`)
 3. Right-click `setup.ps1` > **Run as Administrator** (required to install to Program Files and create a scheduled task)
 4. The setup wizard will walk you through:
@@ -64,16 +64,16 @@ That's it. The monitor is now running on a schedule and will alert you when issu
 
 ```bash
 # Requires .NET 10 SDK
-dotnet build src/VhcMonitor/VhcMonitor.csproj
-dotnet run --project src/VhcMonitor -- setup              # Creates a config file interactively
-dotnet run --project src/VhcMonitor -- all -c vhc-monitor.yaml   # Run all monitors
+dotnet build src/VeeamVhcAws/VeeamVhcAws.csproj
+dotnet run --project src/VeeamVhcAws -- setup              # Creates a config file interactively
+dotnet run --project src/VeeamVhcAws -- all -c veeam-vhc-aws.yaml   # Run all monitors
 ```
 
 #### Option 3: Docker
 
 ```bash
-docker build -t vhc-monitor .
-docker run -v /path/to/config.yaml:/config/config.yaml vhc-monitor
+docker build -t veeam-vhc-aws .
+docker run -v /path/to/config.yaml:/config/config.yaml veeam-vhc-aws
 ```
 
 > The Docker image uses the .NET 10 runtime.
@@ -82,33 +82,33 @@ docker run -v /path/to/config.yaml:/config/config.yaml vhc-monitor
 
 ```bash
 # Interactive setup — creates config file
-vhc-monitor setup
+veeam-vhc-aws setup
 
 # Run all monitors on all servers
-vhc-monitor all -c vhc-monitor.yaml
+veeam-vhc-aws all -c veeam-vhc-aws.yaml
 
 # Run individual monitors
-vhc-monitor repo-health -c config.yaml
-vhc-monitor retention -c config.yaml
-vhc-monitor worker-health -c config.yaml
+veeam-vhc-aws repo-health -c config.yaml
+veeam-vhc-aws retention -c config.yaml
+veeam-vhc-aws worker-health -c config.yaml
 
 # Prometheus HTTP server (long-running mode)
-vhc-monitor serve -c config.yaml --port 9100 --interval 300
+veeam-vhc-aws serve -c config.yaml --port 9100 --interval 300
 
 # Test connectivity to all configured servers
-vhc-monitor test-connection -c config.yaml
+veeam-vhc-aws test-connection -c config.yaml
 
 # Inspect error patterns or match an error string
-vhc-monitor diagnose --list-patterns -c config.yaml
-vhc-monitor diagnose --match "Access key has expired" -c config.yaml
+veeam-vhc-aws diagnose --list-patterns -c config.yaml
+veeam-vhc-aws diagnose --match "Access key has expired" -c config.yaml
 
 # Print version
-vhc-monitor version
+veeam-vhc-aws version
 ```
 
 ### Alert Deduplication
 
-vhc-monitor tracks finding state between runs so you only get notified when something changes — not on every scheduled execution.
+veeam-vhc-aws tracks finding state between runs so you only get notified when something changes — not on every scheduled execution.
 
 | Event | Behavior |
 |-------|----------|
@@ -117,7 +117,7 @@ vhc-monitor tracks finding state between runs so you only get notified when some
 | Problem disappears | `RESOLVED` notification fires |
 | Problem comes back later | Treated as new — alert fires again |
 
-State is stored in `vhc-monitor-state.json` (default: `C:\ProgramData\VHC\vhc-monitor-state.json` on Windows). Deleting this file resets all state — every existing finding will re-alert on the next run.
+State is stored in `veeam-vhc-aws-state.json` (default: `C:\ProgramData\VHC\veeam-vhc-aws-state.json` on Windows). Deleting this file resets all state — every existing finding will re-alert on the next run.
 
 To enable deduplication on webhook handlers, add `deduplicate: true` to the handler config:
 
@@ -132,14 +132,14 @@ output:
 
 ### Daily Summary
 
-VHC Monitor can send a daily health digest showing the complete status of all monitors — not just new issues. Unlike alert notifications (which only fire when something changes), the daily summary always sends at the configured time.
+Veeam VHC AWS Monitor can send a daily health digest showing the complete status of all monitors — not just new issues. Unlike alert notifications (which only fire when something changes), the daily summary always sends at the configured time.
 
-**Windows Standalone:** During `setup.ps1`, you'll be prompted to enable the daily summary and choose a time (default 8:00 AM local). This creates a second Windows Scheduled Task named **VHC Monitor Daily Summary**.
+**Windows Standalone:** During `setup.ps1`, you'll be prompted to enable the daily summary and choose a time (default 8:00 AM local). This creates a second Windows Scheduled Task named **Veeam VHC AWS Monitor Daily Summary**.
 
 **Run on demand:**
 
 ```powershell
-.\vhc-monitor.exe summary -c C:\ProgramData\VHC\vhc-monitor.yaml
+.\veeam-vhc-aws.exe summary -c C:\ProgramData\VHC\veeam-vhc-aws.yaml
 ```
 
 **Config options:**
@@ -171,7 +171,7 @@ The worst severity across all findings determines the exit code, making it CI/CD
 Config file resolution order:
 1. `-c` / `--config` CLI argument
 2. `VHC_MONITOR_CONFIG` environment variable
-3. `./vhc-monitor.yaml` in the current directory
+3. `./veeam-vhc-aws.yaml` in the current directory
 
 See [`config/example.yaml`](config/example.yaml) for the full configuration reference including server setup, thresholds, output handlers, and error patterns.
 
@@ -241,7 +241,7 @@ output:
   - type: email
     smtp_host: smtp.office365.com
     smtp_port: 587
-    from_addr: vhc-monitor@example.com
+    from_addr: veeam-vhc-aws@example.com
     to_addrs: ["oncall@example.com"]
     min_severity: critical
 ```
@@ -252,7 +252,7 @@ To upgrade without re-running the full setup wizard — your config, state, and 
 
 #### Windows Standalone (Recommended)
 
-1. Download the new zip bundle from the [latest release](https://github.com/VeeamHub/veeam-vhc-monitor/releases/latest)
+1. Download the new zip bundle from the [latest release](https://github.com/VeeamHub/veeam-vhc-aws/releases/latest)
 2. Extract it
 3. Open PowerShell **as Administrator** in the extracted folder and run:
 
@@ -266,14 +266,14 @@ That's it. The wizard will:
 
 #### Manual alternative
 
-If you prefer, just copy the new `vhc-monitor.exe` over the existing one:
+If you prefer, just copy the new `veeam-vhc-aws.exe` over the existing one:
 
 ```powershell
-Copy-Item .\vhc-monitor.exe "$env:ProgramFiles\VHC\vhc-monitor.exe" -Force
+Copy-Item .\veeam-vhc-aws.exe "$env:ProgramFiles\VHC\veeam-vhc-aws.exe" -Force
 ```
 
 > [!NOTE]
-> Your config (`C:\ProgramData\VHC\vhc-monitor.yaml`), alert state (`vhc-monitor-state.json`), and logs are stored separately and are never touched by an upgrade.
+> Your config (`C:\ProgramData\VHC\veeam-vhc-aws.yaml`), alert state (`veeam-vhc-aws-state.json`), and logs are stored separately and are never touched by an upgrade.
 
 ---
 
@@ -283,7 +283,7 @@ Copy-Item .\vhc-monitor.exe "$env:ProgramFiles\VHC\vhc-monitor.exe" -Force
 
 ```powershell
 # 1. Remove the scheduled task
-Unregister-ScheduledTask -TaskName "VHC Monitor" -Confirm:$false
+Unregister-ScheduledTask -TaskName "Veeam VHC AWS Monitor" -Confirm:$false
 
 # 2. Delete the install directory (default: C:\Program Files\VHC)
 Remove-Item -Recurse -Force "$env:ProgramFiles\VHC"
@@ -295,13 +295,13 @@ If you installed to a custom directory, replace the path accordingly.
 
 ```bash
 # Remove config and logs
-rm -f ./vhc-monitor.yaml ./vhc-monitor.log ./vhc-monitor-state.json
+rm -f ./veeam-vhc-aws.yaml ./veeam-vhc-aws.log ./veeam-vhc-aws-state.json
 ```
 
 #### Docker
 
 ```bash
-docker rmi vhc-monitor
+docker rmi veeam-vhc-aws
 ```
 
 ### Building from Source
@@ -325,12 +325,12 @@ docker rmi vhc-monitor
 ### Running Tests
 
 ```bash
-dotnet test tests/VhcMonitor.Tests/
+dotnet test tests/VeeamVhcAws.Tests/
 ```
 
 ## ✍ Contributions
 
-We welcome contributions from the community! We encourage you to create [issues](https://github.com/VeeamHub/veeam-vhc-monitor/issues/new/choose) for Bugs & Feature Requests and submit Pull Requests. For more detailed information, refer to our [Contributing Guide](CONTRIBUTING.md).
+We welcome contributions from the community! We encourage you to create [issues](https://github.com/VeeamHub/veeam-vhc-aws/issues/new/choose) for Bugs & Feature Requests and submit Pull Requests. For more detailed information, refer to our [Contributing Guide](CONTRIBUTING.md).
 
 ## 🤝🏾 License
 
@@ -338,4 +338,4 @@ We welcome contributions from the community! We encourage you to create [issues]
 
 ## 🤔 Questions
 
-If you have any questions or something is unclear, please don't hesitate to [create an issue](https://github.com/VeeamHub/veeam-vhc-monitor/issues/new/choose) and let us know!
+If you have any questions or something is unclear, please don't hesitate to [create an issue](https://github.com/VeeamHub/veeam-vhc-aws/issues/new/choose) and let us know!
