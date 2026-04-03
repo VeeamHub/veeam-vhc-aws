@@ -18,7 +18,7 @@ $ExePath     = "$OutDir\veeam-vhc-aws.exe"
 $Version     = (Select-String '<Version>(.*)</Version>' $ProjectPath | ForEach-Object { $_.Matches.Groups[1].Value })
 
 Write-Host ""
-Write-Host "=== Veeam VHC AWS Monitor Build v$Version (win-x64) ===" -ForegroundColor Cyan
+Write-Host "=== Veeam VHC AWS Build v$Version (win-x64) ===" -ForegroundColor Cyan
 Write-Host ""
 
 if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
@@ -72,7 +72,7 @@ Copy-Item "setup.ps1"             $tmpDir
 Copy-Item "config\example.yaml"   $tmpDir
 
 @"
-veeam-vhc-aws — Veeam VHC AWS Monitor
+veeam-vhc-aws — Veeam VHC AWS
 =========================================
 
 Quick Start

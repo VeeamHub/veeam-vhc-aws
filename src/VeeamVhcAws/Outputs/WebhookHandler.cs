@@ -85,7 +85,7 @@ public class WebhookHandler : IOutputHandler
             };
             sections.Add(new Dictionary<string, object>
             {
-                ["activityTitle"] = $"Veeam VHC AWS Monitor: {result.Monitor.ToLowerString()}",
+                ["activityTitle"] = $"Veeam VHC AWS: {result.Monitor.ToLowerString()}",
                 ["facts"] = facts,
                 ["text"] = string.Join("\n", result.Findings
                     .Select(f => $"- [{f.Severity.ToLowerString().ToUpperInvariant()}] {f.Resource}: {f.Message}")),
@@ -97,7 +97,7 @@ public class WebhookHandler : IOutputHandler
             ["@type"] = "MessageCard",
             ["@context"] = "http://schema.org/extensions",
             ["themeColor"] = overallColor.TrimStart('#'),
-            ["summary"] = "Veeam VHC AWS Monitor Results",
+            ["summary"] = "Veeam VHC AWS Results",
             ["sections"] = sections,
         };
     }
@@ -337,7 +337,7 @@ public class WebhookHandler : IOutputHandler
                         ["text"] = new Dictionary<string, object>
                         {
                             ["type"] = "plain_text",
-                            ["text"] = "Daily Veeam VHC AWS Monitor Summary",
+                            ["text"] = "Daily Veeam VHC AWS Summary",
                         }
                     }
                 }
@@ -462,7 +462,7 @@ public class WebhookHandler : IOutputHandler
             ["@type"] = "MessageCard",
             ["@context"] = "http://schema.org/extensions",
             ["themeColor"] = overallColor.TrimStart('#'),
-            ["summary"] = "Daily Veeam VHC AWS Monitor Summary",
+            ["summary"] = "Daily Veeam VHC AWS Summary",
             ["sections"] = sections,
         };
     }

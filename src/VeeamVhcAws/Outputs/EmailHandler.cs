@@ -99,7 +99,7 @@ public class EmailHandler : IOutputHandler
         return $@"
         <html>
         <body style=""font-family:Arial,sans-serif;"">
-            <h2>Veeam VHC AWS Monitor Report</h2>
+            <h2>Veeam VHC AWS Report</h2>
             <table style=""border-collapse:collapse;width:100%;"">
                 <tr style=""background:#f2f2f2;"">
                     <th style=""border:1px solid #ddd;padding:8px;text-align:left;"">Severity</th>
@@ -127,7 +127,7 @@ public class EmailHandler : IOutputHandler
         message.From.Add(MailboxAddress.Parse(_fromAddr));
         foreach (var addr in _toAddrs)
             message.To.Add(MailboxAddress.Parse(addr));
-        message.Subject = isSummary ? "Daily Veeam VHC AWS Monitor Summary" : "Veeam VHC AWS Monitor Alert";
+        message.Subject = isSummary ? "Daily Veeam VHC AWS Summary" : "Veeam VHC AWS Alert";
 
         var bodyBuilder = new BodyBuilder { HtmlBody = html };
         message.Body = bodyBuilder.ToMessageBody();

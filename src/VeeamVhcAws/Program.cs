@@ -53,7 +53,7 @@ public class Program
 
             Console.WriteLine($"veeam-vhc-aws v{version}");
             Console.WriteLine();
-            Console.WriteLine("Veeam VHC AWS Monitor — CLI toolkit for monitoring Veeam infrastructure");
+            Console.WriteLine("Veeam VHC AWS — CLI toolkit for monitoring Veeam infrastructure");
             Console.WriteLine();
             Console.WriteLine("Commands:");
             Console.WriteLine("  all              Run all enabled monitors on all servers");

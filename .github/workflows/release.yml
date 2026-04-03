@@ -90,7 +90,7 @@ jobs:
           cp setup.ps1 release-bundle/
           cp config/example.yaml release-bundle/
           cat > release-bundle/README.txt << 'EOF'
-          veeam-vhc-aws — Veeam VHC AWS Monitor
+          veeam-vhc-aws — Veeam VHC AWS
           =========================================
 
           Quick Start

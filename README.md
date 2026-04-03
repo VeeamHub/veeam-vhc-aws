@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/VeeamHub/veeam-healthcheck/dev/docs/images/health-check-icon.png" alt="Veeam Health Check" width="100">
 </p>
 
-<h1 align="center">Veeam VHC AWS Monitor</h1>
+<h1 align="center">Veeam VHC AWS</h1>
 
 <p align="center">
   <strong>Continuous monitoring and alerting for your Veeam backup infrastructure.</strong>
@@ -24,7 +24,7 @@
 ---
 
 > [!NOTE]
-> Veeam VHC AWS Monitor is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, Veeam VHC AWS Monitor runs continuously and alerts you the moment something goes wrong.
+> Veeam VHC AWS is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, Veeam VHC AWS runs continuously and alerts you the moment something goes wrong.
 
 > This is a community-supported tool and is not an officially supported Veeam product.
 
@@ -132,9 +132,9 @@ output:
 
 ### Daily Summary
 
-Veeam VHC AWS Monitor can send a daily health digest showing the complete status of all monitors — not just new issues. Unlike alert notifications (which only fire when something changes), the daily summary always sends at the configured time.
+Veeam VHC AWS can send a daily health digest showing the complete status of all monitors — not just new issues. Unlike alert notifications (which only fire when something changes), the daily summary always sends at the configured time.
 
-**Windows Standalone:** During `setup.ps1`, you'll be prompted to enable the daily summary and choose a time (default 8:00 AM local). This creates a second Windows Scheduled Task named **Veeam VHC AWS Monitor Daily Summary**.
+**Windows Standalone:** During `setup.ps1`, you'll be prompted to enable the daily summary and choose a time (default 8:00 AM local). This creates a second Windows Scheduled Task named **Veeam VHC AWS Daily Summary**.
 
 **Run on demand:**
 
@@ -283,7 +283,7 @@ Copy-Item .\veeam-vhc-aws.exe "$env:ProgramFiles\VHC\veeam-vhc-aws.exe" -Force
 
 ```powershell
 # 1. Remove the scheduled task
-Unregister-ScheduledTask -TaskName "Veeam VHC AWS Monitor" -Confirm:$false
+Unregister-ScheduledTask -TaskName "Veeam VHC AWS" -Confirm:$false
 
 # 2. Delete the install directory (default: C:\Program Files\VHC)
 Remove-Item -Recurse -Force "$env:ProgramFiles\VHC"
