@@ -17,6 +17,9 @@ param(
     [switch]$Upgrade,
 
     [Parameter(Mandatory=$false)]
+    [switch]$Uninstall,
+
+    [Parameter(Mandatory=$false)]
     [string]$SummaryTime = "",
 
     [Parameter(Mandatory=$false)]
@@ -28,13 +31,54 @@ $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-if ($Upgrade) {
+if ($Uninstall) {
+    Write-Host "  Veeam VHC AWS Uninstall" -ForegroundColor Cyan
+} elseif ($Upgrade) {
     Write-Host "  Veeam VHC AWS Upgrade" -ForegroundColor Cyan
 } else {
     Write-Host "  Veeam VHC AWS Setup" -ForegroundColor Cyan
 }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
+
+# --- UNINSTALL MODE ---
+if ($Uninstall) {
+    $taskNames = @("Veeam VHC AWS", "Veeam VHC AWS Daily Summary")
+    foreach ($tn in $taskNames) {
+        if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName $tn -Confirm:$false
+            Write-Host "  -> Removed scheduled task '$tn'" -ForegroundColor Green
+        } else {
+            Write-Host "  -> Task '$tn' not found (already removed)" -ForegroundColor DarkGray
+        }
+    }
+
+    $exePath = Join-Path $InstallDir "veeam-vhc-aws.exe"
+    if (Test-Path $exePath) {
+        Remove-Item $exePath -Force
+        Write-Host "  -> Removed $exePath" -ForegroundColor Green
+    }
+
+    $dataDir = Join-Path $env:ProgramData "VHC"
+    Write-Host ""
+    Write-Host "  Config and data are preserved at:" -ForegroundColor Yellow
+    Write-Host "    Config: $(Join-Path $InstallDir 'veeam-vhc-aws.yaml')" -ForegroundColor White
+    Write-Host "    State:  $(Join-Path $dataDir 'veeam-vhc-aws-state.json')" -ForegroundColor White
+    Write-Host "    Logs:   $(Join-Path $dataDir 'veeam-vhc-aws*.log')" -ForegroundColor White
+
+    $removeData = Read-Host "  Remove config, state, and logs too? (y/n) [n]"
+    if ($removeData -eq "y") {
+        if (Test-Path $InstallDir) { Remove-Item $InstallDir -Recurse -Force }
+        if (Test-Path $dataDir) { Remove-Item $dataDir -Recurse -Force }
+        Write-Host "  -> Removed all data" -ForegroundColor Green
+    }
+
+    Write-Host ""
+    Write-Host "Uninstall complete." -ForegroundColor Green
+    Write-Host ""
+    exit 0
+}
 
 # --- UPGRADE MODE: swap exe + check for new/missing features ---
 if ($Upgrade) {
@@ -56,6 +100,17 @@ if ($Upgrade) {
     if (-not (Test-Path $InstallDir)) {
         Write-Host "ERROR: Install dir $InstallDir not found. Run setup.ps1 without -Upgrade first." -ForegroundColor Red
         exit 1
+    }
+
+    # Stop tasks to release file lock on the exe (fixes #3)
+    $taskNames = @("Veeam VHC AWS", "Veeam VHC AWS Daily Summary")
+    foreach ($tn in $taskNames) {
+        $t = Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
+        if ($t -and $t.State -eq 'Running') {
+            Stop-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
+            Write-Host "  -> Stopped running task '$tn'" -ForegroundColor Yellow
+        }
+        Disable-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue | Out-Null
     }
 
     Write-Host "Replacing $exeDest ..." -ForegroundColor Yellow
@@ -133,6 +188,11 @@ if ($Upgrade) {
     } else {
         Write-Host "  Config not found at $configPath — skipping feature check." -ForegroundColor Yellow
         Write-Host "  Run setup.ps1 without -Upgrade to do a fresh install." -ForegroundColor Yellow
+    }
+
+    # Re-enable tasks after upgrade
+    foreach ($tn in $taskNames) {
+        Enable-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue | Out-Null
     }
 
     Write-Host ""
@@ -616,10 +676,6 @@ Write-Host "  Manual run:   & '$exeFullPath' all --config '$configPath'" -Foregr
 Write-Host "  View logs:    Get-Content '$logPath' -Tail 50" -ForegroundColor Cyan
 Write-Host "  Edit config:  notepad '$configPath'" -ForegroundColor Cyan
 Write-Host ""
-
-# TODO: Add -Uninstall switch that removes scheduled tasks, deletes install dir, and
-#       optionally removes config/state/log files from C:\ProgramData\VHC with a prompt.
-#       (keep config/state by default so reinstall is seamless)
 
 # TODO: Send a notification (via configured output handlers) when uninstall completes,
 #       so monitoring recipients know alerting has stopped intentionally.
