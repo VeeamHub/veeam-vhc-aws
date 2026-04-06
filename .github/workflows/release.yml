@@ -47,7 +47,7 @@ jobs:
 
   release:
     name: Build & Release
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: [test, security]
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +58,7 @@ jobs:
 
       - name: Get version
         id: version
+        shell: bash
         run: |
           BASE=$(grep -oP '(?<=<Version>)[^<]+' src/VeeamVhcAws/VeeamVhcAws.csproj)
           VERSION="${BASE}.${GITHUB_RUN_NUMBER}"
@@ -66,6 +67,7 @@ jobs:
           echo "Release version: $VERSION"
 
       - name: Publish win-x64
+        shell: bash
         run: |
           dotnet publish src/VeeamVhcAws/VeeamVhcAws.csproj \
             -c Release \
@@ -80,7 +82,6 @@ jobs:
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           endpoint: https://eus.codesigning.azure.net/
           trusted-signing-account-name: vadamc
           certificate-profile-name: vadamc-github
@@ -91,6 +92,7 @@ jobs:
           timestamp-digest: SHA256
 
       - name: Verify single-file output
+        shell: bash
         run: |
           ls -lh dist/win-x64/
           test -f dist/win-x64/veeam-vhc-aws.exe
@@ -99,18 +101,19 @@ jobs:
           [ "$COUNT" -eq 1 ] || echo "::warning::More than 1 file in publish output"
 
       - name: Bundle release zip
+        shell: pwsh
         run: |
-          mkdir -p release-bundle
-          cp dist/win-x64/veeam-vhc-aws.exe release-bundle/
-          cp setup.ps1 release-bundle/
-          cp config/example.yaml release-bundle/
-          cat > release-bundle/README.txt << 'EOF'
+          New-Item -ItemType Directory -Force -Path release-bundle | Out-Null
+          Copy-Item dist/win-x64/veeam-vhc-aws.exe release-bundle/
+          Copy-Item setup.ps1 release-bundle/
+          Copy-Item config/example.yaml release-bundle/
+          @"
           veeam-vhc-aws — Veeam VHC AWS
           =========================================
 
           Quick Start
           -----------
-          1. Right-click setup.ps1 → Run as Administrator
+          1. Right-click setup.ps1 -> Run as Administrator
              (Configures servers, notifications, and creates a scheduled task)
 
           2. Or run manually:
@@ -126,12 +129,14 @@ jobs:
           .\veeam-vhc-aws.exe --help                       Show all commands
 
           Docs: https://github.com/VeeamHub/veeam-veeam-vhc-aws
-          EOF
-          zip -j "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip" release-bundle/*
-          echo "--- Zip contents ---"
-          unzip -l "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip"
+          "@ | Set-Content release-bundle/README.txt
+          $zip = "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip"
+          Compress-Archive -Path release-bundle/* -DestinationPath $zip
+          Write-Host "--- Zip contents ---"
+          [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path).Entries | Select-Object FullName, Length
 
       - name: Check VT API key configured
+        shell: bash
         run: |
           if [ -z "$VT_API_KEY" ]; then
             echo "::warning::VT_API_KEY secret not set — VirusTotal scan will be skipped. Configure the secret for release scanning."
@@ -180,6 +185,7 @@ jobs:
           echo "::warning::VirusTotal analysis did not complete within 10 minutes — proceeding."
 
       - name: Create GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -193,6 +199,6 @@ jobs:
           if [ -n "$VT_URL" ]; then
             CURRENT=$(gh release view "${{ steps.version.outputs.tag }}" --json body -q .body)
             printf '%s\n\n**VirusTotal scan:** %s (%s malicious detections)\n' \
-              "$CURRENT" "$VT_URL" "$VT_COUNT" > /tmp/release-notes.txt
-            gh release edit "${{ steps.version.outputs.tag }}" --notes-file /tmp/release-notes.txt
+              "$CURRENT" "$VT_URL" "$VT_COUNT" > "$TEMP/release-notes.txt"
+            gh release edit "${{ steps.version.outputs.tag }}" --notes-file "$TEMP/release-notes.txt"
           fi
