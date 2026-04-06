@@ -6,8 +6,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
-  attestations: write
 
 jobs:
   test:
@@ -83,11 +81,6 @@ jobs:
           COUNT=$(ls dist/win-x64/ | wc -l)
           echo "Output file count: $COUNT (expected: 1)"
           [ "$COUNT" -eq 1 ] || echo "::warning::More than 1 file in publish output"
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: dist/win-x64/veeam-vhc-aws.exe
 
       - name: Bundle release zip
         run: |
