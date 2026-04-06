@@ -72,7 +72,6 @@ jobs:
             -c Release \
             -r win-x64 \
             --self-contained \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
             -p:Version=${{ steps.version.outputs.version }} \
             -o dist/win-x64 \
             --nologo
@@ -122,6 +121,14 @@ jobs:
           zip -j "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip" release-bundle/*
           echo "--- Zip contents ---"
           unzip -l "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip"
+
+      - name: Check VT API key configured
+        run: |
+          if [ -z "$VT_API_KEY" ]; then
+            echo "::warning::VT_API_KEY secret not set — VirusTotal scan will be skipped. Configure the secret for release scanning."
+          fi
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
 
       - name: VirusTotal Scan
         id: virustotal

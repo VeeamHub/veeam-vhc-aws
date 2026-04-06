@@ -39,7 +39,7 @@ jobs:
   codeql:
     name: CodeQL (C#)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    continue-on-error: false
     permissions:
       contents: read
       security-events: write

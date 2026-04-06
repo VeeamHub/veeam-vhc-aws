@@ -43,7 +43,6 @@ jobs:
             -c Release \
             -r win-x64 \
             --self-contained \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
             -o dist/win-x64 \
             --nologo
 
