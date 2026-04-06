@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Serilog;
 using VeeamVhcAws.Core.Models;
 
@@ -9,6 +10,7 @@ namespace VeeamVhcAws.Core.State;
 public class FindingState
 {
     private static readonly ILogger Logger = Log.ForContext<FindingState>();
+    private static readonly Regex CountSuffix = new(@"\s*\(\d+x in last \d+h\)", RegexOptions.Compiled);
     private readonly string _path;
     private Dictionary<string, object> _state;
 
@@ -20,7 +22,9 @@ public class FindingState
 
     private static string FindingKey(Finding finding, string server, string monitor)
     {
-        var msgTrunc = finding.Message.Length > 80 ? finding.Message[..80] : finding.Message;
+        // Normalize session-count suffix so the key is stable across count changes
+        var msg = CountSuffix.Replace(finding.Message, "");
+        var msgTrunc = msg.Length > 80 ? msg[..80] : msg;
         var identity = $"{server}|{monitor}|{finding.Resource}|{msgTrunc}";
         var hash = MD5.HashData(Encoding.UTF8.GetBytes(identity));
         return Convert.ToHexString(hash).ToLowerInvariant();
@@ -126,7 +130,7 @@ public class FindingState
                 {
                     // NEW finding
                     newFindingsByResult[i].Add(finding);
-                    findings[key] = new Dictionary<string, object>
+                    var entry = new Dictionary<string, object>
                     {
                         ["first_seen"] = now,
                         ["last_seen"] = now,
@@ -136,6 +140,9 @@ public class FindingState
                         ["server"] = result.Server,
                         ["monitor"] = result.Monitor.ToLowerString(),
                     };
+                    if (finding.Details.TryGetValue("count", out var c))
+                        entry["count"] = Convert.ToDouble(c);
+                    findings[key] = entry;
                     Logger.Debug("New finding: {Resource}", finding.Resource);
                 }
                 else
@@ -145,6 +152,20 @@ public class FindingState
                     {
                         prev["last_seen"] = now;
                         prev["severity"] = finding.Severity.ToLowerString();
+
+                        // For session-count findings: suppress re-alert if count hasn't increased
+                        if (finding.Details.TryGetValue("count", out var countObj))
+                        {
+                            var currentCount = Convert.ToDouble(countObj);
+                            var prevCount = prev.TryGetValue("count", out var pc) && pc is double d ? d : 0.0;
+                            prev["count"] = currentCount;
+                            if (currentCount <= prevCount)
+                            {
+                                Logger.Debug("Suppressing session finding (count {Current} <= prev {Prev}): {Resource}",
+                                    currentCount, prevCount, finding.Resource);
+                                continue;
+                            }
+                        }
                     }
                     finding.Details = new Dictionary<string, object>(finding.Details)
                     {
