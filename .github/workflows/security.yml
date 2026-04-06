@@ -56,6 +56,9 @@ jobs:
         with:
           languages: csharp
 
+      - name: Restore
+        run: dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
+
       - name: Build for CodeQL
         run: dotnet build src/VeeamVhcAws/VeeamVhcAws.csproj -c Release --no-restore
 
