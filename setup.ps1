@@ -59,6 +59,7 @@ if ($Upgrade) {
     }
 
     Write-Host "Replacing $exeDest ..." -ForegroundColor Yellow
+    Unblock-File -Path $exeSource
     Copy-Item $exeSource $exeDest -Force
     $newVersion = & $exeDest version 2>&1
     Write-Host "  -> $newVersion" -ForegroundColor Green
@@ -180,6 +181,20 @@ if (-not (Test-Path $InstallDir)) {
 }
 Copy-Item $exeSource (Join-Path $InstallDir "veeam-vhc-aws.exe") -Force
 Write-Host "  -> Copied to $InstallDir\veeam-vhc-aws.exe" -ForegroundColor Green
+
+# Add Defender exclusion for the installed exe so SmartScreen / Smart App Control
+# won't block an unsigned binary that has no ISG cloud reputation yet.
+$exeDest = Join-Path $InstallDir "veeam-vhc-aws.exe"
+try {
+    $existing = (Get-MpPreference).ExclusionPath
+    if ($existing -notcontains $exeDest) {
+        Add-MpPreference -ExclusionPath $exeDest -ErrorAction Stop
+        Write-Host "  -> Added Defender exclusion for $exeDest" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "  -> Could not add Defender exclusion (may need manual step if Smart App Control blocks the exe)" -ForegroundColor Yellow
+    Write-Host "     Run:  Add-MpPreference -ExclusionPath '$exeDest'" -ForegroundColor Yellow
+}
 
 # --- 2. Generate config from user input ---
 Write-Host ""
