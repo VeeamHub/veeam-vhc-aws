@@ -189,4 +189,152 @@ public class RetentionMonitorTests
         Assert.Single(orphanMetric);
         Assert.True(orphanMetric[0].MetricValue >= 1.0);
     }
+
+    private static List<Dictionary<string, object>> MakeRetentionSessions(
+        string sessionType = "Retention", string result = "Failed", string message = "Cannot find full backup",
+        string name = "PROD - K8s Cluster - k8s-cp1", int count = 1)
+    {
+        return Enumerable.Range(0, count).Select(i => new Dictionary<string, object>
+        {
+            ["id"] = $"session-{i}",
+            ["sessionType"] = sessionType,
+            ["name"] = name,
+            ["result"] = new Dictionary<string, object>
+            {
+                ["result"] = result,
+                ["message"] = message,
+            },
+            ["creationTime"] = DateTime.UtcNow.AddHours(-1).ToString("O"),
+        }).ToList();
+    }
+
+    private static Dictionary<string, object> SessionConfig(Dictionary<string, object>? extra = null)
+    {
+        var thresholds = new Dictionary<string, object>
+        {
+            ["overage_multiplier"] = 1.5,
+            ["max_age_multiplier"] = 1.5,
+            ["orphan_detection"] = false,
+        };
+        var retention = new Dictionary<string, object>
+        {
+            ["thresholds"] = thresholds,
+            ["session_lookback_hours"] = 48,
+        };
+        if (extra != null)
+            foreach (var (k, v) in extra) retention[k] = v;
+
+        return new Dictionary<string, object> { ["retention"] = retention };
+    }
+
+    [Fact]
+    public void TestRetentionSessionFailureDetected()
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetJobs().Returns(new List<Dictionary<string, object>>());
+        client.GetBackups().Returns(new List<Dictionary<string, object>>());
+        client.GetRestorePoints(Arg.Any<int>(), Arg.Any<int>()).Returns(new List<Dictionary<string, object>>());
+        client.GetSessions(Arg.Any<int>()).Returns(MakeRetentionSessions());
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RetentionMonitor(SessionConfig());
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Contains(result.Findings, f =>
+            f.Message.Contains("Retention") && f.Message.Contains("Cannot find full backup") &&
+            f.Severity == Severity.Critical);
+
+        var metric = result.Findings.First(f => f.MetricName == "veeam_retention_session_failures");
+        Assert.Equal(1.0, metric.MetricValue);
+    }
+
+    [Fact]
+    public void TestRetentionSessionWarningDetected()
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetJobs().Returns(new List<Dictionary<string, object>>());
+        client.GetBackups().Returns(new List<Dictionary<string, object>>());
+        client.GetRestorePoints(Arg.Any<int>(), Arg.Any<int>()).Returns(new List<Dictionary<string, object>>());
+        client.GetSessions(Arg.Any<int>()).Returns(
+            MakeRetentionSessions(result: "Warning", message: "Minor retention issue"));
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RetentionMonitor(SessionConfig());
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Contains(result.Findings, f =>
+            f.Message.Contains("Retention") && f.Severity == Severity.Warning);
+    }
+
+    [Fact]
+    public void TestRetentionSessionExcludeJobMuted()
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetJobs().Returns(new List<Dictionary<string, object>>());
+        client.GetBackups().Returns(new List<Dictionary<string, object>>());
+        client.GetRestorePoints(Arg.Any<int>(), Arg.Any<int>()).Returns(new List<Dictionary<string, object>>());
+        client.GetSessions(Arg.Any<int>()).Returns(
+            MakeRetentionSessions(name: "PROD - Physical Laptop Backups - 192.168.20.2"));
+
+        var cfg = SessionConfig(new Dictionary<string, object>
+        {
+            ["exclude_jobs"] = new List<object> { "Physical Laptop Backups" },
+        });
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RetentionMonitor(cfg);
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.DoesNotContain(result.Findings, f =>
+            f.Message.Contains("Cannot find full backup"));
+
+        var metric = result.Findings.First(f => f.MetricName == "veeam_retention_session_failures");
+        Assert.Equal(0.0, metric.MetricValue);
+    }
+
+    [Fact]
+    public void TestRetentionSessionExcludeErrorPatternMuted()
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetJobs().Returns(new List<Dictionary<string, object>>());
+        client.GetBackups().Returns(new List<Dictionary<string, object>>());
+        client.GetRestorePoints(Arg.Any<int>(), Arg.Any<int>()).Returns(new List<Dictionary<string, object>>());
+        client.GetSessions(Arg.Any<int>()).Returns(
+            MakeRetentionSessions(message: "Cannot find full backup"));
+
+        var cfg = SessionConfig(new Dictionary<string, object>
+        {
+            ["exclude_session_errors"] = new List<object> { "Cannot find full backup" },
+        });
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RetentionMonitor(cfg);
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.DoesNotContain(result.Findings, f =>
+            f.Message.Contains("Cannot find full backup"));
+
+        var metric = result.Findings.First(f => f.MetricName == "veeam_retention_session_failures");
+        Assert.Equal(0.0, metric.MetricValue);
+    }
+
+    [Fact]
+    public void TestRetentionSessionGroupsDuplicates()
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetJobs().Returns(new List<Dictionary<string, object>>());
+        client.GetBackups().Returns(new List<Dictionary<string, object>>());
+        client.GetRestorePoints(Arg.Any<int>(), Arg.Any<int>()).Returns(new List<Dictionary<string, object>>());
+        client.GetSessions(Arg.Any<int>()).Returns(
+            MakeRetentionSessions(count: 3));
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RetentionMonitor(SessionConfig());
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        var sessionFindings = result.Findings
+            .Where(f => f.Resource.StartsWith("session:") && f.Severity != Severity.Ok).ToList();
+        Assert.Single(sessionFindings);
+        Assert.Contains("3x", sessionFindings[0].Message);
+    }
 }

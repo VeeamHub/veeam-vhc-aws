@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Serilog;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
@@ -12,6 +13,7 @@ public class RetentionMonitor : IMonitor
 {
     private static readonly ILogger Logger = Log.ForContext<RetentionMonitor>();
     private readonly Dictionary<string, object> _config;
+    private List<Regex>? _cachedExcludeSessionErrors;
 
     public MonitorType Type => MonitorType.Retention;
     public IReadOnlyList<string> RequiredConnections => new[] { "vbr" };
@@ -258,6 +260,126 @@ public class RetentionMonitor : IMonitor
                 metricName: "veeam_retention_orphaned_backups", metricValue: orphanCount));
         }
 
+        // --- 6. Retention session failure detection ---
+        var sessionLookbackHours = cfg.Get("session_lookback_hours", 48);
+
+        var defaultSessionTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "retention", "backupretention", "deletebackup",
+        };
+        if (cfg.TryGetValue("session_types", out var stVal) && stVal is List<object> stList)
+        {
+            defaultSessionTypes = new HashSet<string>(
+                stList.Select(x => x.ToString() ?? "").Where(x => x.Length > 0),
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        var excludeJobs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (cfg.TryGetValue("exclude_jobs", out var ejVal) && ejVal is List<object> ejList)
+            foreach (var item in ejList)
+                excludeJobs.Add(item.ToString() ?? "");
+
+        _cachedExcludeSessionErrors ??= BuildExcludeSessionErrors(cfg);
+        var excludeSessionErrors = _cachedExcludeSessionErrors;
+
+        List<Dictionary<string, object>> sessions;
+        try { sessions = client.GetSessions(lookbackHours: sessionLookbackHours) ?? new(); }
+        catch (Exception e) { errors.Add($"Failed to fetch sessions: {e.Message}"); sessions = new(); }
+
+        int retentionSessionFailures = 0;
+        var sessionIssues = new Dictionary<(string, string, string), (int Count, Severity Severity, string ErrorText, string SessionName)>();
+
+        foreach (var session in sessions)
+        {
+            var sessionType = session.GetApiString("sessionType", "type", "");
+            if (string.IsNullOrEmpty(sessionType))
+                sessionType = session.GetApiString("type", "Type", "");
+            sessionType = sessionType.ToLowerInvariant();
+
+            if (!defaultSessionTypes.Contains(sessionType))
+                continue;
+
+            var resultObj = session.GetApi("result", "Result", null);
+            string resultStatus;
+            string errorText;
+
+            if (resultObj is Dictionary<string, object> resultDict)
+            {
+                resultStatus = resultDict.GetApiString("result", "Result", "").ToLowerInvariant();
+                errorText = resultDict.GetApiString("message", "Message", "");
+            }
+            else
+            {
+                resultStatus = resultObj?.ToString()?.ToLowerInvariant() ?? "";
+                errorText = resultObj?.ToString() ?? "";
+            }
+
+            if (resultStatus != "warning" && resultStatus != "failed")
+                continue;
+
+            var sessionName = session.GetApiString("name", "Name", "unknown");
+
+            // Filter: exclude by job name
+            if (excludeJobs.Any(ej => sessionName.Contains(ej, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            // Filter: exclude by error pattern
+            if (excludeSessionErrors.Any(r => r.IsMatch(errorText)))
+                continue;
+
+            retentionSessionFailures++;
+            var severity = resultStatus == "failed" ? Severity.Critical : Severity.Warning;
+
+            string patternCat = "";
+            if (patternEngine != null && !string.IsNullOrEmpty(errorText))
+            {
+                var matched = patternEngine.Classify(errorText);
+                if (matched != null)
+                {
+                    patternCat = matched.Category;
+                    severity = Severity.Critical;
+                }
+            }
+
+            var key = (sessionType, resultStatus, patternCat);
+            if (!sessionIssues.TryGetValue(key, out var existing))
+            {
+                sessionIssues[key] = (1, severity, errorText, sessionName);
+            }
+            else
+            {
+                var worstSev = severity.Rank() > existing.Severity.Rank() ? severity : existing.Severity;
+                sessionIssues[key] = (existing.Count + 1, worstSev, existing.ErrorText, existing.SessionName);
+            }
+        }
+
+        foreach (var ((sessionType, resultStatus, patternCat), info) in sessionIssues)
+        {
+            var countSuffix = info.Count > 1 ? $" ({info.Count}x in last {sessionLookbackHours}h)" : "";
+            var errorDetail = !string.IsNullOrEmpty(info.ErrorText) ? info.ErrorText : "check VBR console for details";
+
+            string msg = !string.IsNullOrEmpty(patternCat)
+                ? $"Retention {patternCat} failure in {sessionType}{countSuffix}: {errorDetail}"
+                : $"Retention {sessionType} {resultStatus}{countSuffix}: {errorDetail}";
+
+            findings.Add(new Finding(info.Severity, $"session:{info.SessionName}", msg,
+                new Dictionary<string, object>
+                {
+                    ["session_type"] = sessionType,
+                    ["session_name"] = info.SessionName,
+                    ["result"] = resultStatus,
+                    ["count"] = info.Count,
+                    ["lookback_hours"] = sessionLookbackHours,
+                    ["error"] = info.ErrorText,
+                }));
+
+            Logger.Information("Retention session issue: {Type} {Status} ({Count}x): {Error}",
+                sessionType, resultStatus, info.Count, info.ErrorText);
+        }
+
+        findings.Add(new Finding(Severity.Ok, "retention-sessions", "retention session failures metric",
+            metricName: "veeam_retention_session_failures", metricValue: retentionSessionFailures));
+
         // --- Overall severity ---
         var overall = Severity.Ok;
         foreach (var f in findings)
@@ -266,5 +388,18 @@ public class RetentionMonitor : IMonitor
 
         var duration = (int)sw.ElapsedMilliseconds;
         return new MonitorResult(Type, DateTime.UtcNow, duration, overall, findings, errors: errors);
+    }
+
+    private static List<Regex> BuildExcludeSessionErrors(Dictionary<string, object> cfg)
+    {
+        var result = new List<Regex>();
+        if (cfg.TryGetValue("exclude_session_errors", out var eseVal) && eseVal is List<object> eseList)
+            foreach (var item in eseList)
+            {
+                var pat = item.ToString() ?? "";
+                if (pat.Length > 0)
+                    result.Add(new Regex(pat, RegexOptions.IgnoreCase | RegexOptions.Compiled));
+            }
+        return result;
     }
 }

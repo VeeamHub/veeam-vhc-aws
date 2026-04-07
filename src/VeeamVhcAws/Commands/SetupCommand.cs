@@ -125,6 +125,11 @@ retention:
   thresholds:
     overage_multiplier: 1.5
     orphan_detection: true
+  session_lookback_hours: 48
+  # exclude_jobs:
+  #   - ""job name substring to mute""
+  # exclude_session_errors:
+  #   - ""error message regex to mute""
 
 worker_health:
   enabled: true

@@ -120,6 +120,26 @@ retention:
   #   - marvinvmtest
   #   - old-test-backup
 
+  # Session failure detection — catches "Cannot find full backup",
+  # "Failed to get last nas backup", and other retention task errors
+  session_lookback_hours: 48
+
+  # Session types to scan (default: retention, backupretention, deletebackup)
+  # session_types:
+  #   - retention
+  #   - backupretention
+  #   - deletebackup
+
+  # Mute specific job names from session failure alerts (substring match)
+  # exclude_jobs:
+  #   - "PROD - Physical Laptop Backups"
+  #   - "old-test-job"
+
+  # Mute specific error messages by regex pattern
+  # exclude_session_errors:
+  #   - "Cannot find full backup"
+  #   - "Failed to get last nas backup"
+
 worker_health:
   enabled: true
   lookback_hours: 24

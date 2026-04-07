@@ -65,7 +65,7 @@ if ($Uninstall) {
     Write-Host "  Config and data are preserved at:" -ForegroundColor Yellow
     Write-Host "    Config: $(Join-Path $InstallDir 'veeam-vhc-aws.yaml')" -ForegroundColor White
     Write-Host "    State:  $(Join-Path $dataDir 'veeam-vhc-aws-state.json')" -ForegroundColor White
-    Write-Host "    Logs:   $(Join-Path $dataDir 'veeam-vhc-aws*.log')" -ForegroundColor White
+    Write-Host "    Logs:   $(Join-Path $dataDir 'logs\veeam-vhc-aws*.log')" -ForegroundColor White
 
     $removeData = Read-Host "  Remove config, state, and logs too? (y/n) [n]"
     if ($removeData -eq "y") {
@@ -120,8 +120,14 @@ if ($Upgrade) {
     Write-Host "  -> $newVersion" -ForegroundColor Green
 
     # --- Feature gap detection ---
-    # For each new feature: check if the config has it, offer to configure if missing.
-    # To add a future feature check: follow the same pattern below.
+    # HOW TO ADD A NEW FEATURE CHECK:
+    #   1. Add a detection block below (before the "Add future feature checks here" comment)
+    #   2. Use regex to check if the feature's key config line exists in $configText
+    #   3. Show [NEW] banner, explain the feature, prompt the user
+    #   4. For top-level sections: append to end of file
+    #   5. For sub-section options: use Insert-ConfigBlock to inject under parent section
+    #   6. Set $anyUpdates = $true if changes were made
+    #   7. Re-read $configText after modification so subsequent checks see updated content
     Write-Host ""
     Write-Host "Checking for new features..." -ForegroundColor Yellow
 
@@ -130,6 +136,39 @@ if ($Upgrade) {
 
     if (Test-Path $configPath) {
         $configText = Get-Content $configPath -Raw -Encoding UTF8
+        $backupPath = $null
+        $dataDir = Join-Path $env:ProgramData "VHC"
+
+        # Helper: write config and create backup on first modification
+        function Save-Config {
+            param([string]$Content)
+            if (-not $backupPath) {
+                $script:backupPath = $configPath + "." + (Get-Date -Format "yyyyMMdd-HHmmss") + ".bak"
+                Copy-Item $configPath $script:backupPath -Force
+                Write-Host "  -> Config backed up to $script:backupPath" -ForegroundColor Green
+            }
+            [IO.File]::WriteAllText($configPath, $Content, [System.Text.UTF8Encoding]::new($false))
+        }
+
+        # Helper: insert a YAML block after the last line of a parent section.
+        # Finds the parent key (e.g. "retention:") and inserts $Block before the next
+        # top-level key (a line starting with a non-space, non-comment character followed by ":").
+        function Insert-ConfigBlock {
+            param([string]$ConfigText, [string]$ParentKey, [string]$Block)
+            # Find where the parent section starts
+            if ($ConfigText -notmatch "(?m)^${ParentKey}:") { return $ConfigText }
+            $parentIdx = $ConfigText.IndexOf("${ParentKey}:")
+            # Find the next top-level key after the parent
+            $afterParent = $ConfigText.Substring($parentIdx + $ParentKey.Length + 1)
+            if ($afterParent -match '(?m)^\r?\n[a-zA-Z_]') {
+                $nextKeyOffset = $afterParent.IndexOf($Matches[0])
+                $insertAt = $parentIdx + $ParentKey.Length + 1 + $nextKeyOffset
+                return $ConfigText.Substring(0, $insertAt) + "`r`n" + $Block + "`r`n" + $ConfigText.Substring($insertAt)
+            } else {
+                # Parent is last section — append to end
+                return $ConfigText.TrimEnd() + "`r`n" + $Block + "`r`n"
+            }
+        }
 
         # ---- Feature: daily_summary ----
         if ($configText -notmatch '(?m)^daily_summary:') {
@@ -141,9 +180,10 @@ if ($Upgrade) {
                 $dsTime = Read-Host "  Daily summary time (HH:MM, 24-hour local) [08:00]"
                 if (-not $dsTime) { $dsTime = "08:00" }
 
-                # Append daily_summary block to config (BOM-free UTF-8)
+                # Append daily_summary block to config
                 $dsBlock = "`r`n`r`ndaily_summary:`r`n  enabled: true`r`n"
-                [IO.File]::WriteAllText($configPath, $configText.TrimEnd() + $dsBlock, [System.Text.UTF8Encoding]::new($false))
+                $configText = $configText.TrimEnd() + $dsBlock
+                Save-Config $configText
                 Write-Host "  -> daily_summary added to config" -ForegroundColor Green
 
                 # Create the scheduled task
@@ -181,6 +221,95 @@ if ($Upgrade) {
             }
         } else {
             Write-Host "  daily_summary: already configured" -ForegroundColor DarkGray
+        }
+
+        # ---- Feature: retention session failure detection ----
+        if ($configText -match '(?m)^retention:' -and $configText -notmatch 'session_lookback_hours') {
+            Write-Host ""
+            Write-Host "  [NEW] Retention session failure detection" -ForegroundColor Cyan
+            Write-Host "        Detects failed retention tasks like 'Cannot find full backup'" -ForegroundColor DarkGray
+            Write-Host "        and 'Failed to get last nas backup'. Reports all failures by" -ForegroundColor DarkGray
+            Write-Host "        default — you can mute specific jobs or error messages." -ForegroundColor DarkGray
+            Write-Host ""
+            $rsChoice = Read-Host "  Enable retention session monitoring? (y/n) [y]"
+            if ($rsChoice -ne "n") {
+                $rsLookback = Read-Host "  Session lookback hours (how far back to scan) [48]"
+                if (-not $rsLookback) { $rsLookback = "48" }
+
+                $rsBlock = "  session_lookback_hours: $rsLookback"
+
+                # Prompt for jobs to exclude
+                Write-Host ""
+                Write-Host "  You can mute specific jobs that always fail and you don't care about." -ForegroundColor DarkGray
+                Write-Host "  Uses substring matching (e.g. 'Laptop Backups' matches 'PROD - Physical Laptop Backups')." -ForegroundColor DarkGray
+                $exJobs = Read-Host "  Job names to exclude (comma-separated, or blank to skip)"
+                if ($exJobs) {
+                    $rsBlock += "`r`n  exclude_jobs:"
+                    foreach ($job in ($exJobs -split ',')) {
+                        $job = $job.Trim()
+                        if ($job) { $rsBlock += "`r`n    - `"$job`"" }
+                    }
+                }
+
+                # Prompt for error patterns to exclude
+                Write-Host ""
+                Write-Host "  You can also mute specific error messages by pattern (regex)." -ForegroundColor DarkGray
+                Write-Host "  Example: 'Cannot find full backup' or 'Failed to get last nas backup'" -ForegroundColor DarkGray
+                $exErrors = Read-Host "  Error patterns to exclude (comma-separated, or blank to skip)"
+                if ($exErrors) {
+                    $rsBlock += "`r`n  exclude_session_errors:"
+                    foreach ($pat in ($exErrors -split ',')) {
+                        $pat = $pat.Trim()
+                        if ($pat) { $rsBlock += "`r`n    - `"$pat`"" }
+                    }
+                }
+
+                $configText = Insert-ConfigBlock $configText "retention" $rsBlock
+                Save-Config $configText
+                Write-Host "  -> Retention session monitoring added to config" -ForegroundColor Green
+                $anyUpdates = $true
+            } else {
+                Write-Host "  -> Skipped. Enable later by adding 'session_lookback_hours: 48' under retention: in $configPath" -ForegroundColor DarkGray
+            }
+        } else {
+            if ($configText -match 'session_lookback_hours') {
+                Write-Host "  retention session monitoring: already configured" -ForegroundColor DarkGray
+            }
+        }
+
+        # ---- Feature: log subfolder migration ----
+        if ($configText -match 'logging:' -and $configText -match '(?m)file:.*\\VHC\\veeam-vhc-aws' -and $configText -notmatch '\\logs\\') {
+            Write-Host ""
+            Write-Host "  [NEW] Log file organization" -ForegroundColor Cyan
+            Write-Host "        Moves log files into a dedicated logs\ subfolder under ProgramData\VHC\" -ForegroundColor DarkGray
+            $logChoice = Read-Host "  Migrate logs to VHC\logs\ subfolder? (y/n) [y]"
+            if ($logChoice -ne "n") {
+                $logDir = Join-Path $dataDir "logs"
+                if (-not (Test-Path $logDir)) {
+                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+                    icacls $logDir /grant "Users:(OI)(CI)M" 2>$null | Out-Null
+                }
+                # Update the config file path
+                $configText = $configText -replace '(file:\s*")[^"]*\\VHC\\(veeam-vhc-aws)', "`$1$($dataDir -replace '\\', '\\')\\logs\\`$2"
+                Save-Config $configText
+                # Move existing log files
+                $existingLogs = Get-ChildItem -Path $dataDir -Filter "veeam-vhc-aws*.log" -ErrorAction SilentlyContinue
+                foreach ($log in $existingLogs) {
+                    try {
+                        Move-Item $log.FullName (Join-Path $logDir $log.Name) -Force -ErrorAction Stop
+                    } catch {
+                        Write-Host "  WARNING: Could not move $($log.Name) — file may be in use" -ForegroundColor Yellow
+                    }
+                }
+                Write-Host "  -> Logs migrated to $logDir" -ForegroundColor Green
+                $anyUpdates = $true
+            } else {
+                Write-Host "  -> Skipped. Logs will remain in current location." -ForegroundColor DarkGray
+            }
+        } else {
+            if ($configText -match '\\logs\\') {
+                Write-Host "  log subfolder: already configured" -ForegroundColor DarkGray
+            }
         }
 
         # ---- Add future feature checks here ----
@@ -494,7 +623,12 @@ if (-not (Test-Path $dataDir)) {
     # Grant Users modify access so non-elevated runs can write logs
     icacls $dataDir /grant "Users:(OI)(CI)M" | Out-Null
 }
-$logPath = Join-Path $dataDir "veeam-vhc-aws.log"
+$logDir = Join-Path $dataDir "logs"
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    icacls $logDir /grant "Users:(OI)(CI)M" 2>$null | Out-Null
+}
+$logPath = Join-Path $logDir "veeam-vhc-aws.log"
 $statePath = Join-Path $dataDir "veeam-vhc-aws-state.json"
 
 $configContent = @"
@@ -533,6 +667,11 @@ retention:
     overage_multiplier: 1.5
     max_age_multiplier: 1.5
     orphan_detection: true
+  session_lookback_hours: 48
+  # exclude_jobs:
+  #   - "job name substring to mute"
+  # exclude_session_errors:
+  #   - "error message regex to mute"
 
 worker_health:
   enabled: true
