@@ -40,8 +40,10 @@ public class Program
             ServeCommand.Create(),
             TestConnectionCommand.Create(),
             DiagnoseCommand.Create(),
+            CapturesCommand.Create(),
             VersionCommand.Create(),
             SetupCommand.Create(),
+            EncryptConfigCommand.Create(),
         };
 
         // Welcome screen when no subcommand provided
@@ -62,10 +64,12 @@ public class Program
             Console.WriteLine("  worker-health    Run the worker health monitor");
             Console.WriteLine("  summary          Run all monitors and emit a daily summary");
             Console.WriteLine("  serve            Start Prometheus HTTP server with periodic monitoring");
-            Console.WriteLine("  test-connection  Test connectivity to all configured servers");
+            Console.WriteLine("  test-connection  Test connectivity to all configured servers and SMTP");
             Console.WriteLine("  diagnose         Show known error patterns or match against them");
+            Console.WriteLine("  captures         View and manage captured errors and suppressions");
             Console.WriteLine("  version          Print the version");
             Console.WriteLine("  setup            Create a config file from the bundled example");
+            Console.WriteLine("  encrypt-config   Obfuscate plaintext passwords in config file in-place");
             Console.WriteLine();
             Console.WriteLine("Use --help for more information about a command.");
         });

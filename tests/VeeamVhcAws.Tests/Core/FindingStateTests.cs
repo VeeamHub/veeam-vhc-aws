@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Xunit;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.State;
@@ -132,6 +133,276 @@ public class FindingStateTests
             Assert.Single(filtered[0].Findings);
             Assert.Equal("veeam_test", filtered[0].Findings[0].MetricName);
             Assert.Empty(resolved);
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void NonOkFindingsCapturedInState()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var state = new FindingState(statePath);
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding>
+                    {
+                        new(Severity.Warning, "repo:Test", "Low space on repository")
+                    }, server: "server1")
+            };
+
+            state.ProcessResults(results);
+
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            Assert.True(root.TryGetProperty("captured_errors", out var captured));
+            Assert.Single(captured.EnumerateObject());
+
+            var entry = captured.EnumerateObject().First().Value;
+            Assert.Equal("warning", entry.GetProperty("severity").GetString());
+            Assert.Equal("repo:Test", entry.GetProperty("resource").GetString());
+            Assert.Equal("server1", entry.GetProperty("server").GetString());
+            Assert.Equal("repo_health", entry.GetProperty("monitor").GetString());
+            Assert.False(entry.GetProperty("suppressed").GetBoolean());
+            Assert.Equal(1.0, entry.GetProperty("count").GetDouble());
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void CapturedErrorCountIncrementsOnRepeat()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var state = new FindingState(statePath);
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding>
+                    {
+                        new(Severity.Warning, "repo:Test", "Low space")
+                    }, server: "server1")
+            };
+            state.ProcessResults(results);
+
+            var state2 = new FindingState(statePath);
+            state2.ProcessResults(results);
+
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            var captured = doc.RootElement.GetProperty("captured_errors");
+            var entry = captured.EnumerateObject().First().Value;
+            Assert.Equal(2.0, entry.GetProperty("count").GetDouble());
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void ConfigSuppressionsSkipFinding()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var suppressions = new List<string> { "Low space" };
+            var state = new FindingState(statePath, suppressions);
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding>
+                    {
+                        new(Severity.Warning, "repo:Test", "Low space on repository")
+                    }, server: "server1")
+            };
+
+            var (filtered, resolved) = state.ProcessResults(results);
+
+            // Finding should be filtered out (not emitted)
+            Assert.Empty(filtered[0].Findings);
+
+            // But should be captured in state as suppressed
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            var captured = doc.RootElement.GetProperty("captured_errors");
+            var entry = captured.EnumerateObject().First().Value;
+            Assert.True(entry.GetProperty("suppressed").GetBoolean());
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void ConfigSuppressionsAreCaseInsensitive()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var suppressions = new List<string> { "LOW SPACE" };
+            var state = new FindingState(statePath, suppressions);
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding>
+                    {
+                        new(Severity.Warning, "repo:Test", "Low space on repository")
+                    }, server: "server1")
+            };
+
+            var (filtered, _) = state.ProcessResults(results);
+            Assert.Empty(filtered[0].Findings);
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void StateSuppressionsSkipFinding()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            // First pass — capture the finding
+            var state = new FindingState(statePath);
+            var finding = new Finding(Severity.Warning, "repo:Test", "Low space");
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding> { finding }, server: "server1")
+            };
+            state.ProcessResults(results);
+
+            // Get the key from captured_errors
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            var capturedKey = doc.RootElement.GetProperty("captured_errors").EnumerateObject().First().Name;
+
+            // Write a suppression to state file
+            var stateDict = JsonSerializer.Deserialize<Dictionary<string, object>>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+            var suppressionsDict = new Dictionary<string, object>
+            {
+                [capturedKey] = new Dictionary<string, object>
+                {
+                    ["suppressed_at"] = DateTime.UtcNow.ToString("O")
+                }
+            };
+            stateDict["suppressions"] = suppressionsDict;
+            File.WriteAllText(statePath, JsonSerializer.Serialize(stateDict, new JsonSerializerOptions { WriteIndented = true }));
+
+            // Second pass — finding should be suppressed
+            var state2 = new FindingState(statePath);
+            var (filtered, _) = state2.ProcessResults(results);
+            Assert.Empty(filtered[0].Findings);
+
+            // Verify it's marked suppressed in captured_errors
+            json = File.ReadAllText(statePath);
+            doc = JsonDocument.Parse(json);
+            var entry = doc.RootElement.GetProperty("captured_errors").GetProperty(capturedKey);
+            Assert.True(entry.GetProperty("suppressed").GetBoolean());
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void CapturedErrorTextTruncatedTo120Chars()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var longMessage = new string('x', 200);
+            var state = new FindingState(statePath);
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding>
+                    {
+                        new(Severity.Warning, "repo:Test", longMessage)
+                    }, server: "server1")
+            };
+            state.ProcessResults(results);
+
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            var entry = doc.RootElement.GetProperty("captured_errors").EnumerateObject().First().Value;
+            var text = entry.GetProperty("text").GetString()!;
+            Assert.Equal(120, text.Length);
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void MetricsAndOkNotCaptured()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var state = new FindingState(statePath);
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Ok,
+                    new List<Finding>
+                    {
+                        new(Severity.Ok, "repo:Test", "All good"),
+                        new(Severity.Ok, "repo:Test", "metric", metricName: "veeam_test", metricValue: 42.0)
+                    }, server: "server1")
+            };
+
+            state.ProcessResults(results);
+
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            var captured = doc.RootElement.GetProperty("captured_errors");
+            Assert.Empty(captured.EnumerateObject());
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void SuppressedFindingHasSuppressedDetailKey()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var suppressions = new List<string> { "Low space" };
+            var state = new FindingState(statePath, suppressions);
+            var finding = new Finding(Severity.Warning, "repo:Test", "Low space on repository");
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding> { finding }, server: "server1")
+            };
+
+            state.ProcessResults(results);
+
+            // The finding object should have _suppressed detail set even though it's not emitted
+            Assert.True(finding.Details.ContainsKey("_suppressed"));
+            Assert.Equal(true, finding.Details["_suppressed"]);
         }
         finally
         {

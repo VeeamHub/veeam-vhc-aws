@@ -18,8 +18,10 @@ global:
     rotation_keep: 30
     # Also log to stderr console (default: true)
     console: true
-    # Warn when disk free space falls below this MB (default: 500)
-    disk_warning_mb: 500
+    # Disk free space threshold as a percentage of total drive capacity (default: 20)
+    # Warning fires at exactly this percentage; critical fires for every percent below it.
+    # Checked on every run — no deduplication. Set to 0 to disable.
+    disk_warning_pct: 20
 
 # Servers to monitor — add as many as needed
 # Each entry must have: name, type (vbr or vbaws), url
@@ -205,6 +207,14 @@ error_patterns:
     message: "Invalid credentials — check IAM access key or role permissions"
     category: credential
     source: vbaws
+
+# Suppress specific errors from alerting (substring match against finding message).
+# Suppressed findings are still captured in state for audit; they just don't trigger alerts.
+# Use 'veeam-vhc-aws captures list' to view all captured errors.
+# Use 'veeam-vhc-aws captures suppress <key>' to suppress dynamically via the state file.
+suppressions:
+  # - "Access Key Id you provided"  # suppress if you've acknowledged a credential warning
+  # - "zero deleted items"          # suppress zero-retention warnings on known-empty repos
 
 # Daily summary — sends a complete status digest once per day
 # Schedule via setup.ps1 (creates a separate Windows scheduled task)

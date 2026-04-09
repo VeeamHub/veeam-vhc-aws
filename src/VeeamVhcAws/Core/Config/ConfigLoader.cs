@@ -1,3 +1,5 @@
+using System.Text;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using Microsoft.Extensions.Logging;
@@ -39,7 +41,7 @@ public static class ConfigLoader
                 ["rotation_interval"] = 1,
                 ["rotation_keep"] = 30,
                 ["console"] = true,
-                ["disk_warning_mb"] = 500,
+                ["disk_warning_pct"] = 20,
             },
         },
         ["repo_health"] = new Dictionary<string, object>
@@ -102,13 +104,129 @@ public static class ConfigLoader
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .Build();
 
-        var yaml = File.ReadAllText(path);
-        var raw = deserializer.Deserialize<Dictionary<string, object>>(yaml)
-            ?? new Dictionary<string, object>();
+        var yaml = NormalizeBackslashes(File.ReadAllText(path));
+        Dictionary<string, object> raw;
+        try
+        {
+            raw = deserializer.Deserialize<Dictionary<string, object>>(yaml)
+                ?? new Dictionary<string, object>();
+        }
+        catch (YamlException ex)
+        {
+            var lines = yaml.Split('\n');
+            var line = ex.Start.Line > 0 && ex.Start.Line <= lines.Length
+                ? $"\n  Line {ex.Start.Line}: {lines[ex.Start.Line - 1].Trim()}"
+                : string.Empty;
+            throw new InvalidOperationException(
+                $"Config parse error in '{path}' — check for unescaped special characters in quoted values " +
+                $"(use single quotes or escape backslashes as \\\\).{line}", ex);
+        }
 
         var config = DeepMerge(Defaults, raw);
         ApplyEnvServers(config);
         return config;
+    }
+
+    /// <summary>
+    /// Normalizes bare backslashes in YAML double-quoted strings so that
+    /// Windows paths and complex passwords don't require manual escaping.
+    /// YamlDotNet treats \u, \U, \x as Unicode/hex escapes; this doubles any
+    /// backslash that doesn't form a valid YAML escape sequence.
+    /// </summary>
+    internal static string NormalizeBackslashes(string yaml)
+    {
+        var sb = new StringBuilder(yaml.Length);
+        var i = 0;
+
+        while (i < yaml.Length)
+        {
+            var c = yaml[i];
+
+            if (c == '\'')
+            {
+                // Single-quoted scalar: no escape processing, just copy until closing '
+                // The only special sequence is '' (escaped single quote).
+                sb.Append(c);
+                i++;
+                while (i < yaml.Length)
+                {
+                    if (yaml[i] == '\'' && i + 1 < yaml.Length && yaml[i + 1] == '\'')
+                    {
+                        sb.Append("''");
+                        i += 2;
+                    }
+                    else if (yaml[i] == '\'')
+                    {
+                        sb.Append(yaml[i++]);
+                        break;
+                    }
+                    else
+                    {
+                        sb.Append(yaml[i++]);
+                    }
+                }
+            }
+            else if (c == '"')
+            {
+                // Double-quoted scalar: normalize invalid backslash escapes.
+                sb.Append(c);
+                i++;
+                while (i < yaml.Length && yaml[i] != '"')
+                {
+                    if (yaml[i] == '\\' && i + 1 < yaml.Length)
+                    {
+                        if (IsValidYamlEscape(yaml, i))
+                        {
+                            sb.Append(yaml[i++]);
+                            sb.Append(yaml[i++]);
+                        }
+                        else
+                        {
+                            sb.Append('\\');
+                            sb.Append('\\');
+                            i++;
+                        }
+                    }
+                    else
+                    {
+                        sb.Append(yaml[i++]);
+                    }
+                }
+                if (i < yaml.Length)
+                    sb.Append(yaml[i++]); // closing "
+            }
+            else
+            {
+                sb.Append(yaml[i++]);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static bool IsValidYamlEscape(string s, int pos)
+    {
+        if (pos + 1 >= s.Length) return false;
+        return s[pos + 1] switch
+        {
+            '0' or 'a' or 'b' or 't' or '\t' or 'n' or 'v' or 'f'
+                or 'r' or 'e' or '"' or '\\' or '/' or 'N' or '_'
+                or 'L' or 'P' or '\n' => true,
+            'x' => pos + 3 < s.Length && IsHex(s[pos + 2]) && IsHex(s[pos + 3]),
+            'u' => pos + 5 < s.Length && IsHex(s, pos + 2, 4),
+            'U' => pos + 9 < s.Length && IsHex(s, pos + 2, 8),
+            _ => false
+        };
+    }
+
+    private static bool IsHex(char c) =>
+        c is (>= '0' and <= '9') or (>= 'a' and <= 'f') or (>= 'A' and <= 'F');
+
+    private static bool IsHex(string s, int start, int count)
+    {
+        for (var i = 0; i < count; i++)
+            if (start + i >= s.Length || !IsHex(s[start + i])) return false;
+        return true;
     }
 
     public static Dictionary<string, object> DeepMerge(

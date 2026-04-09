@@ -20,6 +20,7 @@ public static class LoggingSetup
         var logFile = logCfg.Get("file", "./veeam-vhc-aws.log");
         var rotationKeep = logCfg.Get("rotation_keep", 30);
         var consoleEnabled = logCfg.Get("console", true);
+        var diskWarningPct = logCfg.Get("disk_warning_pct", 20);
 
         var level = levelName switch
         {
@@ -57,9 +58,9 @@ public static class LoggingSetup
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level,-8:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
                 encoding: System.Text.Encoding.UTF8);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Fall back to console only if file can't be opened
+            Console.Error.WriteLine($"[veeam-vhc-aws] WARNING: File logging could not be configured for '{logFile}': {ex.Message}. Falling back to console only.");
         }
 
         // Console sink
@@ -71,6 +72,39 @@ public static class LoggingSetup
         }
 
         Log.Logger = logConfig.CreateLogger();
+
+        CheckLogDiskSpace(logFile, diskWarningPct);
+    }
+
+    /// <summary>
+    /// Checks free space on the log file's drive and emits a warning or critical log on every run.
+    /// Warning fires at exactly the threshold; critical fires for every percent below it.
+    /// No deduplication — fires on every invocation so the operator cannot miss it.
+    /// </summary>
+    private static void CheckLogDiskSpace(string logFilePath, int warningPct)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(logFilePath));
+            if (string.IsNullOrEmpty(root)) return;
+
+            var drive = new System.IO.DriveInfo(root);
+            if (!drive.IsReady || drive.TotalSize == 0) return;
+
+            var freePct = (int)(drive.AvailableFreeSpace * 100L / drive.TotalSize);
+            var freeGb = drive.AvailableFreeSpace / (1024.0 * 1024.0 * 1024.0);
+
+            if (freePct < warningPct)
+                Log.Error("Disk space CRITICAL on log drive ({Root}): {FreePct}% free ({FreeGb:F1} GB) — below {WarningPct}% warning threshold",
+                    root, freePct, freeGb, warningPct);
+            else if (freePct == warningPct)
+                Log.Warning("Disk space WARNING on log drive ({Root}): {FreePct}% free ({FreeGb:F1} GB) — at {WarningPct}% threshold",
+                    root, freePct, freeGb, warningPct);
+        }
+        catch
+        {
+            // Best effort — don't block startup if drive info is unavailable
+        }
     }
 
     public static string RedactSensitive(string message)

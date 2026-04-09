@@ -49,3 +49,7 @@ veeam-vhc-aws-test.yaml
 # Plans and AI
 Plans/*
 CLAUDE.md
+
+# Added by ggshield
+.cache_ggshield
+test-smtp.yaml

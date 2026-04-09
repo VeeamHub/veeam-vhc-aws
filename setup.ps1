@@ -8,7 +8,7 @@ param(
     [string]$AlertUrl,
 
     [Parameter(Mandatory=$false)]
-    [int]$IntervalMinutes = 5,
+    [int]$IntervalMinutes = 60,
 
     [Parameter(Mandatory=$false)]
     [string]$InstallDir = "$env:ProgramFiles\VHC",
@@ -28,6 +28,34 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function ConvertTo-ObfuscatedPassword {
+    param([string]$Plaintext)
+    if ([string]::IsNullOrEmpty($Plaintext)) { return $Plaintext }
+
+    $passphrase = [System.Text.Encoding]::UTF8.GetBytes("veeam-vhc-aws-config-obfuscation-v1")
+    $salt = [System.Text.Encoding]::UTF8.GetBytes("vhc-aws-salt-2024")
+    $kdf = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($passphrase, $salt, 100000, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    $key = $kdf.GetBytes(32)
+    $kdf.Dispose()
+
+    $plaintextBytes = [System.Text.Encoding]::UTF8.GetBytes($Plaintext)
+    $nonce = [byte[]]::new(12)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
+    $ciphertext = [byte[]]::new($plaintextBytes.Length)
+    $tag = [byte[]]::new(16)
+
+    $aes = [System.Security.Cryptography.AesGcm]::new([byte[]]$key, 16)
+    $aes.Encrypt([byte[]]$nonce, [byte[]]$plaintextBytes, [byte[]]$ciphertext, [byte[]]$tag)
+    $aes.Dispose()
+
+    $combined = [byte[]]::new(12 + $ciphertext.Length + 16)
+    [System.Buffer]::BlockCopy($nonce, 0, $combined, 0, 12)
+    [System.Buffer]::BlockCopy($ciphertext, 0, $combined, 12, $ciphertext.Length)
+    [System.Buffer]::BlockCopy($tag, 0, $combined, 12 + $ciphertext.Length, 16)
+
+    return "ENC:" + [Convert]::ToBase64String($combined)
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -201,8 +229,7 @@ if ($Upgrade) {
                 }
                 $dsSettings = New-ScheduledTaskSettingsSet `
                     -StartWhenAvailable -DontStopOnIdleEnd `
-                    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
-                    -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+                    -ExecutionTimeLimit (New-TimeSpan -Hours 6)
                 $dsPrincipal = New-ScheduledTaskPrincipal `
                     -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 
@@ -400,12 +427,15 @@ if ($vbrUrl) {
     $vbrPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($vbrPass)
     )
+    # Escape backslashes for YAML double-quoted strings (e.g. DOMAIN\user → DOMAIN\\user)
+    $vbrUserYaml = $vbrUser -replace '\\', '\\'
+    $vbrPassYaml = ConvertTo-ObfuscatedPassword $vbrPassPlain
     $vbrBlock = @"
   - name: vbr
     type: vbr
     url: $vbrUrl
-    username: "$vbrUser"
-    password: "$vbrPassPlain"
+    username: "$vbrUserYaml"
+    password: "$vbrPassYaml"
     verify_ssl: false
 "@
 }
@@ -419,12 +449,15 @@ if ($vbawsUrl) {
     $vbawsPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($vbawsPass)
     )
+    # Escape backslashes for YAML double-quoted strings
+    $vbawsUserYaml = $vbawsUser -replace '\\', '\\'
+    $vbawsPassYaml = ConvertTo-ObfuscatedPassword $vbawsPassPlain
     $vbawsBlock = @"
   - name: vbaws
     type: vbaws
     url: $vbawsUrl
-    username: "$vbawsUser"
-    password: "$vbawsPassPlain"
+    username: "$vbawsUserYaml"
+    password: "$vbawsPassYaml"
     verify_ssl: false
 "@
 }
@@ -550,10 +583,13 @@ function Add-NotificationBlock {
                 $smtpPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
                     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($smtpPass)
                 )
+                # Escape backslashes for YAML double-quoted strings
+                $smtpUserYaml = $smtpUser -replace '\\', '\\'
+                $smtpPassYaml = ConvertTo-ObfuscatedPassword $smtpPassPlain
                 $smtpPassBlock = @"
 
-    smtp_username: "$smtpUser"
-    smtp_password: "$smtpPassPlain"
+    smtp_username: "$smtpUserYaml"
+    smtp_password: "$smtpPassYaml"
 "@
             }
             $severity = Read-Host "  Minimum severity to notify (ok/warning/critical) [critical]"
@@ -615,6 +651,25 @@ if ($NoSummary) {
         $summaryTimeVal = $SummaryTime
     }
 }
+
+# --- 2c. Check interval ---
+Write-Host ""
+Write-Host "[2c/5] Setting check interval" -ForegroundColor Yellow
+Write-Host ""
+while ($true) {
+    $intervalInput = Read-Host "  How often should VHC run checks? (minutes, default: 60)"
+    if ([string]::IsNullOrWhiteSpace($intervalInput)) {
+        $IntervalMinutes = 60
+        break
+    }
+    $parsed = 0
+    if ([int]::TryParse($intervalInput, [ref]$parsed) -and $parsed -gt 0) {
+        $IntervalMinutes = $parsed
+        break
+    }
+    Write-Host "  Invalid input. Please enter a positive integer." -ForegroundColor Yellow
+}
+Write-Host "  -> Check interval: $IntervalMinutes minutes" -ForegroundColor Green
 
 # Logs and state go in ProgramData so non-elevated manual runs can also write
 $dataDir = Join-Path $env:ProgramData "VHC"
@@ -725,9 +780,7 @@ $taskTrigger = New-ScheduledTaskTrigger `
 $taskSettings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -DontStopOnIdleEnd `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+    -ExecutionTimeLimit (New-TimeSpan -Hours 6)
 
 $taskPrincipal = New-ScheduledTaskPrincipal `
     -UserId "SYSTEM" `
@@ -739,6 +792,37 @@ if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     Write-Host "  -> Removed existing '$taskName' task" -ForegroundColor Yellow
 }
+
+# Write failure-alerting wrapper script
+$wrapperPath = Join-Path $InstallDir "Run-VhcAws.ps1"
+$alertUrlEscaped = if ($AlertUrl) { $AlertUrl } else { "" }
+$wrapperContent = @"
+# VHC AWS Monitor wrapper — alerts on task failure
+`$exePath = Join-Path `$PSScriptRoot "veeam-vhc-aws.exe"
+`$configPath = Join-Path `$PSScriptRoot "veeam-vhc-aws.yaml"
+& `$exePath all --config `$configPath
+if (`$LASTEXITCODE -ne 0) {
+    `$alertUrl = "$alertUrlEscaped"  # substituted during setup
+    if (`$alertUrl) {
+        `$body = "VHC AWS scheduled task failed with exit code `$LASTEXITCODE on `$env:COMPUTERNAME"
+        try {
+            Invoke-WebRequest -Uri `$alertUrl -Method Post -Body `$body -UseBasicParsing -ErrorAction Stop | Out-Null
+        } catch {
+            Write-Warning "Failed to send failure alert: `$_"
+        }
+    }
+}
+"@
+[IO.File]::WriteAllText($wrapperPath, $wrapperContent, [System.Text.UTF8Encoding]::new($false))
+if ($AlertUrl) {
+    Write-Host "  -> Failure alerting: wrapper script at $wrapperPath" -ForegroundColor Green
+}
+
+# Update task action to use the wrapper script
+$taskAction = New-ScheduledTaskAction `
+    -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+    -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$wrapperPath`"" `
+    -WorkingDirectory $InstallDir
 
 Register-ScheduledTask `
     -TaskName $taskName `
@@ -803,7 +887,12 @@ Write-Host ""
 Write-Host "  Install dir:  $InstallDir" -ForegroundColor White
 Write-Host "  Config:       $configPath" -ForegroundColor White
 Write-Host "  Log file:     $logPath" -ForegroundColor White
-Write-Host "  Schedule:     Every $IntervalMinutes minutes" -ForegroundColor White
+if ($IntervalMinutes -ge 60) {
+    $intervalDisplay = "$([math]::Round($IntervalMinutes / 60, 1)) hour(s) ($IntervalMinutes min)"
+} else {
+    $intervalDisplay = "$IntervalMinutes minutes"
+}
+Write-Host "  Schedule:     Every $intervalDisplay" -ForegroundColor White
 if ($setupSummary) {
     Write-Host "  Daily summary: $summaryTimeVal" -ForegroundColor White
 }

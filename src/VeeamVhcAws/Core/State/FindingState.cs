@@ -12,11 +12,13 @@ public class FindingState
     private static readonly ILogger Logger = Log.ForContext<FindingState>();
     private static readonly Regex CountSuffix = new(@"\s*\(\d+x in last \d+h\)", RegexOptions.Compiled);
     private readonly string _path;
+    private readonly List<string> _configSuppressions;
     private Dictionary<string, object> _state;
 
-    public FindingState(string stateFile = "./veeam-vhc-aws-state.json")
+    public FindingState(string stateFile = "./veeam-vhc-aws-state.json", List<string>? configSuppressions = null)
     {
         _path = stateFile;
+        _configSuppressions = configSuppressions ?? new List<string>();
         _state = Load();
     }
 
@@ -36,6 +38,8 @@ public class FindingState
             return new Dictionary<string, object>
             {
                 ["findings"] = new Dictionary<string, object>(),
+                ["captured_errors"] = new Dictionary<string, object>(),
+                ["suppressions"] = new Dictionary<string, object>(),
                 ["last_run"] = null!,
             };
 
@@ -51,6 +55,8 @@ public class FindingState
             return new Dictionary<string, object>
             {
                 ["findings"] = new Dictionary<string, object>(),
+                ["captured_errors"] = new Dictionary<string, object>(),
+                ["suppressions"] = new Dictionary<string, object>(),
                 ["last_run"] = null!,
             };
         }
@@ -101,6 +107,24 @@ public class FindingState
         return empty;
     }
 
+    private Dictionary<string, object> GetCapturedErrors()
+    {
+        if (_state.TryGetValue("captured_errors", out var c) && c is Dictionary<string, object> captured)
+            return captured;
+        var empty = new Dictionary<string, object>();
+        _state["captured_errors"] = empty;
+        return empty;
+    }
+
+    private Dictionary<string, object> GetSuppressions()
+    {
+        if (_state.TryGetValue("suppressions", out var s) && s is Dictionary<string, object> suppressions)
+            return suppressions;
+        var empty = new Dictionary<string, object>();
+        _state["suppressions"] = empty;
+        return empty;
+    }
+
     public (List<MonitorResult> FilteredResults, List<Finding> Resolved) ProcessResults(List<MonitorResult> results)
     {
         var now = DateTime.UtcNow.ToString("O");
@@ -108,6 +132,8 @@ public class FindingState
         var newFindingsByResult = new Dictionary<int, List<Finding>>();
         var resolved = new List<Finding>();
         var findings = GetFindings();
+        var capturedErrors = GetCapturedErrors();
+        var stateSuppressions = GetSuppressions();
 
         for (int i = 0; i < results.Count; i++)
         {
@@ -125,6 +151,45 @@ public class FindingState
 
                 var key = FindingKey(finding, result.Server, result.Monitor.ToLowerString());
                 currentKeys.Add(key);
+
+                // Check suppression: state suppressions or config substring match
+                var isSuppressed = stateSuppressions.ContainsKey(key) ||
+                    _configSuppressions.Any(s => finding.Message.Contains(s, StringComparison.OrdinalIgnoreCase));
+
+                // Capture in captured_errors
+                if (capturedErrors.TryGetValue(key, out var existingObj) && existingObj is Dictionary<string, object> existing)
+                {
+                    existing["last_seen"] = now;
+                    existing["count"] = (existing.TryGetValue("count", out var cnt) && cnt is double d ? d : 0) + 1;
+                    existing["suppressed"] = isSuppressed;
+                    existing["severity"] = finding.Severity.ToLowerString();
+                }
+                else
+                {
+                    var textTrunc = finding.Message.Length > 120 ? finding.Message[..120] : finding.Message;
+                    capturedErrors[key] = new Dictionary<string, object>
+                    {
+                        ["text"] = textTrunc,
+                        ["severity"] = finding.Severity.ToLowerString(),
+                        ["resource"] = finding.Resource,
+                        ["monitor"] = result.Monitor.ToLowerString(),
+                        ["server"] = result.Server,
+                        ["first_seen"] = now,
+                        ["last_seen"] = now,
+                        ["count"] = 1.0,
+                        ["suppressed"] = isSuppressed,
+                    };
+                }
+
+                if (isSuppressed)
+                {
+                    finding.Details = new Dictionary<string, object>(finding.Details)
+                    {
+                        ["_suppressed"] = true
+                    };
+                    Logger.Debug("Suppressed finding: {Resource} — {Message}", finding.Resource, finding.Message);
+                    continue;
+                }
 
                 if (!findings.ContainsKey(key))
                 {
@@ -172,6 +237,7 @@ public class FindingState
                         ["_seen_before"] = true
                     };
                     newFindingsByResult[i].Add(finding);
+                    Logger.Debug("Ongoing finding (seen before): {Resource}", finding.Resource);
                 }
             }
         }

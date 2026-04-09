@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using MailKit.Net.Smtp;
 using Spectre.Console;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Logging;
@@ -62,7 +63,40 @@ public static class TestConnectionCommand
                 }
             }
 
-            if (servers.Count == 0)
+            // Test SMTP outputs
+            var outputConfigs = cfg.GetListOfSections("output");
+            foreach (var output in outputConfigs)
+            {
+                if (output.Get("type", "") != "email") continue;
+
+                var host = output.Get("smtp_host", "");
+                var port = output.Get("smtp_port", 587);
+                var username = output.Get("smtp_username", "");
+                var password = output.Get("smtp_password", "");
+                var useTls = output.Get("use_tls", true);
+                var label = $"{host}:{port}";
+
+                try
+                {
+                    using var client = new SmtpClient();
+                    client.Connect(host, port, useTls
+                        ? MailKit.Security.SecureSocketOptions.StartTls
+                        : MailKit.Security.SecureSocketOptions.Auto);
+                    if (!string.IsNullOrEmpty(username))
+                        client.Authenticate(username, password);
+                    var caps = client.Capabilities.ToString();
+                    client.Disconnect(true);
+                    table.AddRow(label, "SMTP", "[green]Connected[/]",
+                        !string.IsNullOrEmpty(username) ? "Auth OK" : "No auth configured");
+                }
+                catch (Exception e)
+                {
+                    var msg = e.Message.Length > 200 ? e.Message[..200] : e.Message;
+                    table.AddRow(label, "SMTP", "[red]Failed[/]", msg);
+                }
+            }
+
+            if (servers.Count == 0 && outputConfigs.All(o => o.Get("type", "") != "email"))
                 AnsiConsole.MarkupLine("[yellow]No servers configured.[/]");
             else
                 AnsiConsole.Write(table);

@@ -181,7 +181,7 @@ public class WebhookHandler : IOutputHandler
                 var resource = f.Resource;
                 if (!string.IsNullOrEmpty(result.Server) && resource.StartsWith($"[{result.Server}] "))
                     resource = resource[($"[{result.Server}] ".Length)..];
-                lines.Add($"- {resource}: {f.Message}");
+                lines.Add($"- {resource}: {TruncateMessage(f.Message)}");
             }
             if (alertable.Count > 15)
                 lines.Add($"- ... and {alertable.Count - 15} more");
@@ -242,6 +242,37 @@ public class WebhookHandler : IOutputHandler
         };
     }
 
+    private static string BoldWorkloads(string message)
+    {
+        var idx = message.IndexOf("Workloads:", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return message;
+        var prefix = message[..(idx + "Workloads:".Length)];
+        var list = message[(idx + "Workloads:".Length)..].Trim();
+        return $"{prefix} **{list}**";
+    }
+
+    private static string TruncateMessage(string message, int maxLength = 160)
+    {
+        if (message.Length <= maxLength) return message;
+
+        // Smart truncation: summarize "Workloads: a, b, c, ..." as "Workloads: N items"
+        var workloadsIdx = message.IndexOf("Workloads:", StringComparison.OrdinalIgnoreCase);
+        if (workloadsIdx >= 0)
+        {
+            var prefix = message[..workloadsIdx];
+            var workloadList = message[(workloadsIdx + "Workloads:".Length)..].Trim();
+            var count = workloadList.Split(',').Length;
+            // Extract the common path prefix for context (e.g. "\syn01\docker")
+            var firstItem = workloadList.Split(',')[0].Trim();
+            var contextHint = firstItem.Contains(' ')
+                ? firstItem[..firstItem.LastIndexOf(' ')].TrimEnd('\\')
+                : firstItem;
+            return $"{prefix}Workloads: {count} items ({contextHint}…)";
+        }
+
+        return message[..maxLength] + "…";
+    }
+
     private Dictionary<string, object> FormatNtfySummary(IReadOnlyList<MonitorResult> results)
     {
         var worst = results.Aggregate(Severity.Ok, (acc, r) =>
@@ -283,7 +314,7 @@ public class WebhookHandler : IOutputHandler
                     resource = resource[($"[{result.Server}] ".Length)..];
                 var icon = f.Severity is Severity.Critical or Severity.Error ? "🔴" : "⚠️";
                 var serverTag = !string.IsNullOrEmpty(result.Server) ? $"[{result.Server}] " : "";
-                issueLines.Add($"{icon} {serverTag}{resource} — {f.Message}");
+                issueLines.Add($"{icon} {serverTag}{resource} — {BoldWorkloads(TruncateMessage(f.Message))}");
             }
         }
 
@@ -472,7 +503,10 @@ public class WebhookHandler : IOutputHandler
         var isSummary = results.Any(r => r.Metadata.ContainsKey("summary") && r.Metadata["summary"] is true);
 
         if (!isSummary && !ShouldSend(results))
+        {
+            Logger.Information("Webhook skipped for {Url} — severity below threshold ({MinSeverity})", _url, _minSeverity);
             return;
+        }
 
         Dictionary<string, object> payload;
         if (isSummary)
@@ -510,7 +544,7 @@ public class WebhookHandler : IOutputHandler
 
             if (!hasNewAlerts && !hasResolved)
             {
-                Logger.Debug("Skipping ntfy — no new or resolved findings");
+                Logger.Information("Webhook skipped for {Url} — no new or resolved findings (dedup)", _url);
                 return;
             }
         }

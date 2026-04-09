@@ -18,8 +18,10 @@ global:
     rotation_keep: 30
     # Also log to stderr console (default: true)
     console: true
-    # Warn when disk free space falls below this MB (default: 500)
-    disk_warning_mb: 500
+    # Disk free space threshold as a percentage of total drive capacity (default: 20)
+    # Warning fires at exactly this percentage; critical fires for every percent below it.
+    # Checked on every run — no deduplication. Set to 0 to disable.
+    disk_warning_pct: 20
 
 # Servers to monitor — add as many as needed
 # Each entry must have: name, type (vbr or vbaws), url

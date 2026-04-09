@@ -91,4 +91,91 @@ public class ConfigLoaderTests
         var empty = dict.GetSection("missing");
         Assert.Empty(empty);
     }
+
+    [Theory]
+    [InlineData(@"username: ""DOMAIN\Username""", @"username: ""DOMAIN\\Username""")]
+    [InlineData(@"password: ""P@ss\word!""", @"password: ""P@ss\\word!""")]
+    // \U (Users) and \D (Desktop) are invalid YAML escapes → doubled.
+    // \a (adam) IS a valid YAML escape (bell char) → left as-is per spec.
+    [InlineData("path: \"C:\\Users\\adam\\Desktop\"", "path: \"C:\\\\Users\\adam\\\\Desktop\"")]
+    public void NormalizeBackslashes_EscapesBareBackslashInDoubleQuoted(string input, string expected)
+    {
+        var result = ConfigLoader.NormalizeBackslashes(input);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("key: \"already\\\\escaped\"")]
+    [InlineData("key: \"newline\\nhere\"")]
+    [InlineData("key: \"tab\\there\"")]
+    public void NormalizeBackslashes_LeavesValidEscapesAlone(string input)
+    {
+        var result = ConfigLoader.NormalizeBackslashes(input);
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void NormalizeBackslashes_IgnoresSingleQuotedStrings()
+    {
+        var input = @"username: 'DOMAIN\Username'";
+        var result = ConfigLoader.NormalizeBackslashes(input);
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void NormalizeBackslashes_ParsesWindowsDomainCredentials()
+    {
+        var yaml = "servers:\n  - username: \"DOMAIN\\\\adam\"\n    password: \"P@ss\\\\w0rd!\"";
+        // Should not throw
+        var result = ConfigLoader.NormalizeBackslashes(yaml);
+        Assert.Contains("DOMAIN", result);
+    }
+
+    [Fact]
+    public void NormalizeBackslashes_HandlesValidUnicodeEscape()
+    {
+        // \u0041 is valid (4 hex digits) — should pass through unchanged
+        var input = "key: \"\\u0041\"";
+        var result = ConfigLoader.NormalizeBackslashes(input);
+        Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void NormalizeBackslashes_FixesInvalidUnicodeEscape()
+    {
+        // \Users — \U not followed by 8 hex digits → should be doubled
+        var input = "key: \"\\Users\"";
+        var result = ConfigLoader.NormalizeBackslashes(input);
+        Assert.Equal("key: \"\\\\Users\"", result);
+    }
+
+    [Fact]
+    public void GetListOfStringsReturnsStringsFromList()
+    {
+        var dict = new Dictionary<string, object>
+        {
+            ["items"] = new List<object> { "alpha", "beta", "gamma" }
+        };
+        var result = dict.GetListOfStrings("items");
+        Assert.Equal(3, result.Count);
+        Assert.Equal("alpha", result[0]);
+        Assert.Equal("beta", result[1]);
+        Assert.Equal("gamma", result[2]);
+    }
+
+    [Fact]
+    public void GetListOfStringsReturnsEmptyForMissingKey()
+    {
+        var dict = new Dictionary<string, object>();
+        var result = dict.GetListOfStrings("missing");
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void GetListOfStringsHandlesNonListValue()
+    {
+        var dict = new Dictionary<string, object> { ["items"] = "not a list" };
+        var result = dict.GetListOfStrings("items");
+        Assert.Empty(result);
+    }
 }

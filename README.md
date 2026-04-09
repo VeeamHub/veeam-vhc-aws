@@ -76,7 +76,7 @@ docker build -t veeam-vhc-aws .
 docker run -v /path/to/config.yaml:/config/config.yaml veeam-vhc-aws
 ```
 
-> The Docker image uses the .NET 10 runtime.
+> The Docker image is built with the .NET 10 SDK and runs as a self-contained binary on a minimal `runtime-deps` base image.
 
 ### Usage
 
@@ -101,6 +101,14 @@ veeam-vhc-aws test-connection -c config.yaml
 # Inspect error patterns or match an error string
 veeam-vhc-aws diagnose --list-patterns -c config.yaml
 veeam-vhc-aws diagnose --match "Access key has expired" -c config.yaml
+
+# View and manage captured errors and suppressions
+veeam-vhc-aws captures list -c config.yaml
+veeam-vhc-aws captures suppress <key> -c config.yaml
+veeam-vhc-aws captures unsuppress <key> -c config.yaml
+
+# Obfuscate plaintext passwords in config file in-place
+veeam-vhc-aws encrypt-config -c config.yaml
 
 # Print version
 veeam-vhc-aws version
@@ -197,6 +205,14 @@ servers:
     verify_ssl: false
 ```
 
+> [!TIP]
+> **Passwords and usernames with backslashes** (e.g. `DOMAIN\user`, `P@ss\word`): use **single quotes** in your config file to avoid YAML escape interpretation.
+> ```yaml
+> username: 'DOMAIN\backupadmin'
+> password: 'P@ss\word!'
+> ```
+> Double-quoted values (`"..."`) process backslash sequences — `\n` becomes a newline, `\t` a tab, etc. Single-quoted values are always literal. If you do use double quotes, escape every backslash: `"DOMAIN\\backupadmin"`.
+
 - **Dynamic parallelism:** 2 or fewer servers run sequentially. 3+ run in parallel (up to 20 workers).
 - **Failure isolation:** If one server is unreachable, the others continue normally.
 - **Server prefixing:** All findings include the server name (e.g., `[prod-vbr] repo:Backup Copy Repo`).
@@ -245,6 +261,45 @@ output:
     to_addrs: ["oncall@example.com"]
     min_severity: critical
 ```
+
+### Logging
+
+Log files rotate daily and are stored alongside the config by default. Key options:
+
+```yaml
+global:
+  logging:
+    level: INFO                     # DEBUG, INFO, WARNING, ERROR (default: DEBUG)
+    file: ./veeam-vhc-aws.log       # log file path
+    rotation_keep: 30               # number of daily files to retain (default: 30)
+    console: true                   # also write to stderr (default: true)
+    disk_warning_pct: 20            # warn when drive free space hits this % (default: 20)
+```
+
+#### Disk Space Alerts
+
+On every run, veeam-vhc-aws checks the free space on the drive where the log file lives:
+
+| Free Space | Result |
+|------------|--------|
+| Above threshold | No alert |
+| Equal to `disk_warning_pct` | `WARNING` log entry |
+| Below `disk_warning_pct` | `ERROR` log entry — fires every run, no deduplication |
+
+The check always fires — it intentionally bypasses the normal finding deduplication so you cannot miss a critical disk condition. Set `disk_warning_pct: 0` to disable.
+
+#### Log Volume Estimates
+
+Logs are small in normal operation. The table below shows estimates for a representative large environment (280 sessions/day, ~4,000 workloads):
+
+| Run Frequency | Log Level | Daily Volume | 30-Day Total |
+|---------------|-----------|-------------|--------------|
+| Every 15 min  | INFO      | ~1.5 MB     | ~45 MB       |
+| Hourly        | INFO      | ~350 KB     | ~10 MB       |
+| Hourly        | DEBUG     | ~700 KB     | ~21 MB       |
+| Every 15 min  | DEBUG + 30% failure rate | ~13 MB | ~400 MB |
+
+> **Recommendation:** Use `level: INFO` in production. `DEBUG` is useful for troubleshooting but can generate ~400 MB/month on high-failure environments running frequently. If you're on a small Windows VM (< 2 GB free), consider dropping `rotation_keep` to 7–14 days.
 
 ### Upgrading
 

@@ -154,15 +154,34 @@ public class VbrClient : IVbrClient
         return ExtractDataList(result);
     }
 
-    public List<Dictionary<string, object>> GetSessions(int lookbackHours = 48)
+    public List<Dictionary<string, object>> GetSessions(int lookbackHours = 24)
     {
         var cutoff = DateTime.UtcNow.AddHours(-lookbackHours);
-        var queryParams = new Dictionary<string, string>
+        var createdAfter = cutoff.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        var allSessions = new List<Dictionary<string, object>>();
+        int offset = 0;
+        int pageSize = 50;
+
+        while (true)
         {
-            ["createdAfter"] = cutoff.ToString("yyyy-MM-ddTHH:mm:ssZ")
-        };
-        var result = Request("GET", "/api/v1/sessions", queryParams);
-        return ExtractDataList(result);
+            var result = Request("GET", "/api/v1/sessions",
+                new Dictionary<string, string>
+                {
+                    ["createdAfter"] = createdAfter,
+                    ["limit"] = pageSize.ToString(),
+                    ["skip"] = offset.ToString()
+                });
+            var page = ExtractDataList(result);
+            if (page.Count == 0)
+                break;
+            allSessions.AddRange(page);
+            if (page.Count < pageSize)
+                break;
+            offset += pageSize;
+        }
+
+        Logger.Debug("Fetched {Count} sessions total (paginated)", allSessions.Count);
+        return allSessions;
     }
 
     public List<Dictionary<string, object>> GetJobs()

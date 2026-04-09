@@ -162,6 +162,36 @@ public class RepoHealthMonitorTests
     }
 
     [Fact]
+    public void TestDefaultSessionLookbackIs24Hours()
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetRepositoryStates().Returns(new List<Dictionary<string, object>>());
+        client.GetSessions(Arg.Any<int>()).Returns(new List<Dictionary<string, object>>());
+        client.GetScaleoutRepositories().Returns(new List<Dictionary<string, object>>());
+
+        // Config without session_lookback_hours or external_maintenance_lookback_hours
+        // so the code falls through to the hardcoded default of 24.
+        var cfg = new Dictionary<string, object>
+        {
+            ["repo_health"] = new Dictionary<string, object>
+            {
+                ["thresholds"] = new Dictionary<string, object>
+                {
+                    ["free_space_warning_pct"] = 15,
+                    ["free_space_critical_pct"] = 5,
+                },
+                ["check_external_maintenance"] = true,
+            }
+        };
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RepoHealthMonitor(cfg);
+        monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        client.Received(1).GetSessions(Arg.Is<int>(h => h == 24));
+    }
+
+    [Fact]
     public void TestNoExternalMaintenanceSessions()
     {
         var client = Substitute.For<IVbrClient>();

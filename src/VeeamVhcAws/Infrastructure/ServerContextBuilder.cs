@@ -15,7 +15,7 @@ public static class ServerContextBuilder
         var serverType = serverCfg.Get("type", "vbr").ToLowerInvariant();
         var url = serverCfg.Get("url", "");
         var username = serverCfg.Get("username", "");
-        var password = serverCfg.Get("password", "");
+        var password = PasswordObfuscator.Deobfuscate(serverCfg.Get("password", ""));
         var verifySsl = serverCfg.Get("verify_ssl", true);
         var timeout = globalCfg.Get("timeout_seconds", 30);
         var retryCount = globalCfg.Get("retry_count", 2);

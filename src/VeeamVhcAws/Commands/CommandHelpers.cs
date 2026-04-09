@@ -24,14 +24,15 @@ public static class CommandHelpers
         var configPath = ConfigLoader.GetConfigPath(configArg);
         var config = ConfigLoader.LoadConfig(configPath);
         LoggingSetup.Setup(config);
-        Logger.Information("veeam-vhc-aws starting");
+        Logger.Information("veeam-vhc-aws starting (PID {ProcessId})", Environment.ProcessId);
 
         var servers = ServerContextBuilder.BuildAllServers(config);
         var patternEngine = BuildPatternEngine(config);
         var handlers = OutputHandlerFactory.CreateHandlers(config);
         var dispatcher = new OutputDispatcher(handlers);
         var stateFile = config.GetSection("global").Get("state_file", "./veeam-vhc-aws-state.json");
-        var state = new FindingState(stateFile);
+        var configSuppressions = config.GetListOfStrings("suppressions");
+        var state = new FindingState(stateFile, configSuppressions);
 
         Logger.Information("Configured {ServerCount} servers, {HandlerCount} output handlers",
             servers.Count, handlers.Count);

@@ -51,6 +51,17 @@ public static class ConfigExtensions
         return new Dictionary<string, object>();
     }
 
+    public static List<string> GetListOfStrings(this Dictionary<string, object> dict, string key)
+    {
+        if (!dict.TryGetValue(key, out var value))
+            return new List<string>();
+
+        if (value is List<object> list)
+            return list.Select(x => x?.ToString() ?? "").Where(s => s.Length > 0).ToList();
+
+        return new List<string>();
+    }
+
     public static List<Dictionary<string, object>> GetListOfSections(this Dictionary<string, object> dict, string key)
     {
         if (!dict.TryGetValue(key, out var value))

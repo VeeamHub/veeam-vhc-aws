@@ -49,20 +49,32 @@ public class EmailHandler : IOutputHandler
         return results.Any(r => r.OverallSeverity.Rank() >= minOrder);
     }
 
+    private static string BoldWorkloadsHtml(string message)
+    {
+        var idx = message.IndexOf("Workloads:", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return message;
+        var prefix = message[..(idx + "Workloads:".Length)];
+        var list = message[(idx + "Workloads:".Length)..].Trim();
+        return $"{prefix} <strong>{list}</strong>";
+    }
+
     private string BuildHtml(IReadOnlyList<MonitorResult> results)
     {
         var rows = new StringBuilder();
         foreach (var result in results)
         {
+            var nonOkFindings = result.Findings.Where(f => f.Severity != Severity.Ok).ToList();
+            if (nonOkFindings.Count == 0) continue;
+
             var color = SeverityColors.GetValueOrDefault(result.OverallSeverity, "#808080");
             var findingHtml = new StringBuilder();
-            foreach (var f in result.Findings)
+            foreach (var f in nonOkFindings)
             {
                 var fColor = SeverityColors.GetValueOrDefault(f.Severity, "#808080");
                 findingHtml.Append(
                     $"<li><span style=\"color:{fColor};font-weight:bold;\">" +
                     $"[{f.Severity.ToLowerString().ToUpperInvariant()}]</span> " +
-                    $"<strong>{f.Resource}</strong>: {f.Message}</li>");
+                    $"<strong>{f.Resource}</strong>: {BoldWorkloadsHtml(f.Message)}</li>");
             }
 
             rows.Append($@"
@@ -119,7 +131,10 @@ public class EmailHandler : IOutputHandler
         var isSummary = results.Any(r => r.Metadata.ContainsKey("summary") && r.Metadata["summary"] is true);
 
         if (!isSummary && !ShouldSend(results))
+        {
+            Logger.Information("Email skipped — severity below threshold ({MinSeverity})", _minSeverity);
             return;
+        }
 
         var html = BuildHtml(results);
 

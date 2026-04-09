@@ -101,7 +101,7 @@ public class RepoHealthMonitor : IMonitor
 
         // --- 2. Session-based repo issue detection ---
         var lookbackHours = cfg.Get("session_lookback_hours",
-            cfg.Get("external_maintenance_lookback_hours", 48));
+            cfg.Get("external_maintenance_lookback_hours", 24));
         int credentialExpiredCount = 0;
         int sessionWarningCount = 0;
 

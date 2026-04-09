@@ -245,14 +245,33 @@ public class RetentionMonitor : IMonitor
                 var bName = backupInfo.GetValueOrDefault("name", "unknown")?.ToString() ?? "unknown";
                 if (excludeBackups.Contains(bName)) continue;
 
-                var rpCount = allRestorePoints.Count(rp =>
-                    rp.GetApiString("backupId", "BackupId", "") == backupId);
+                var orphanPoints = allRestorePoints
+                    .Where(rp => rp.GetApiString("backupId", "BackupId", "") == backupId)
+                    .ToList();
+                var rpCount = orphanPoints.Count;
+                var workloadNames = orphanPoints
+                    .Select(rp =>
+                    {
+                        var n = rp.GetApiString("name", "Name", "");
+                        if (string.IsNullOrEmpty(n)) n = rp.GetApiString("vmName", "VmName", "");
+                        // NAS/unstructured restore points include ordinal suffixes like " Id: 10"
+                        // (e.g. "\\syn01\docker Id: 10") — strip them to surface the actual workload path.
+                        if (n.StartsWith(@"\\", StringComparison.Ordinal))
+                            n = Regex.Replace(n, @"\s+Id:\s*\d+$", "", RegexOptions.IgnoreCase);
+                        return n;
+                    })
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(n => n)
+                    .ToList();
+                var workloadList = workloadNames.Count > 0 ? string.Join(", ", workloadNames) : "unknown";
                 orphanCount++;
                 findings.Add(new Finding(Severity.Warning, $"backup:{bName}",
-                    $"Orphaned backup '{bName}': {rpCount} restore points, no active job",
+                    $"Orphaned backup '{bName}': {rpCount} restore points, no active job. Workloads: {workloadList}",
                     new Dictionary<string, object>
                     {
                         ["backup_id"] = backupId, ["job_id"] = jobId, ["restore_point_count"] = rpCount,
+                        ["workloads"] = workloadNames,
                     }));
             }
 
@@ -261,7 +280,7 @@ public class RetentionMonitor : IMonitor
         }
 
         // --- 6. Retention session failure detection ---
-        var sessionLookbackHours = cfg.Get("session_lookback_hours", 48);
+        var sessionLookbackHours = cfg.Get("session_lookback_hours", 24);
 
         var defaultSessionTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
