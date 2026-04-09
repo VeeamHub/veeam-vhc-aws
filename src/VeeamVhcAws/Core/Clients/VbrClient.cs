@@ -41,7 +41,7 @@ public class VbrClient : IVbrClient
     }
 
     private Dictionary<string, object> Request(string method, string path,
-        Dictionary<string, string>? queryParams = null)
+        Dictionary<string, string>? queryParams = null, object? jsonBody = null)
     {
         var url = $"{_baseUrl}{path}";
         if (queryParams != null && queryParams.Count > 0)
@@ -62,6 +62,13 @@ public class VbrClient : IVbrClient
                 var request = new HttpRequestMessage(new HttpMethod(method), url);
                 foreach (var (key, value) in headers)
                     request.Headers.TryAddWithoutValidation(key, value);
+
+                if (jsonBody != null)
+                {
+                    var bodyJson = JsonSerializer.Serialize(jsonBody,
+                        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                    request.Content = new StringContent(bodyJson, System.Text.Encoding.UTF8, "application/json");
+                }
 
                 var response = client.SendAsync(request).GetAwaiter().GetResult();
                 var durationMs = sw.ElapsedMilliseconds;
@@ -281,5 +288,40 @@ public class VbrClient : IVbrClient
     public Dictionary<string, object> GetServerInfo()
     {
         return Request("GET", "/api/v1/serverInfo");
+    }
+
+    public List<Dictionary<string, object>> GetManagedServers(string? typeFilter = null)
+    {
+        var queryParams = typeFilter != null
+            ? new Dictionary<string, string> { ["typeFilter"] = typeFilter }
+            : null;
+        var result = Request("GET", "/api/v1/backupInfrastructure/managedServers", queryParams);
+        return ExtractDataList(result);
+    }
+
+    public List<Dictionary<string, object>> GetInventory(string hostname,
+        string hierarchyType = "VmsAndTemplates", int limit = 200)
+    {
+        var body = new
+        {
+            hierarchyType,
+            pagination = new { skip = 0, limit }
+        };
+        var result = Request("POST", $"/api/v1/inventory/{Uri.EscapeDataString(hostname)}",
+            jsonBody: body);
+        return ExtractDataList(result);
+    }
+
+    public Dictionary<string, object> GetConnectionCertificate(string serverName,
+        string credentialsId, string type = "ViHost", int port = 443)
+    {
+        var body = new
+        {
+            serverName,
+            credentialsId,
+            type,
+            port
+        };
+        return Request("POST", "/api/v1/connectionCertificate", jsonBody: body);
     }
 }

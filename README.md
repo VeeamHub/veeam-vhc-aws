@@ -34,6 +34,7 @@
 - **Repository Health** -- Monitors repo capacity (including SOBR extents), detects unreachable repos, checks all repo-related sessions for credential/S3/connectivity failures
 - **Retention Compliance** -- Validates restore point counts and ages against policy, detects orphaned backups (with Kasten/external policy awareness and configurable exclusions)
 - **Worker Health** -- Analyzes VBAWS session failure rates, detects subnet exhaustion, credential failures, and silent retention failures
+- **Infrastructure Health** -- Query managed servers (vCenter, ESXi, Windows/Linux hosts) for availability status, browse vCenter inventory (VMs, clusters, datastores), and check TLS certificate expiry via the VBR REST API
 - **Cross-Correlation** -- Links findings across monitors per-server to surface root causes (e.g., credential expiry causing retention failures)
 - **Flexible Output** -- JSON, webhooks (Slack/Teams/PagerDuty/ntfy), Prometheus metrics, email
 - **Logging** -- Verbose logging with time-based rotation, disk space alerts, and credential redaction
