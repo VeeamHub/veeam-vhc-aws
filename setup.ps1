@@ -1,7 +1,7 @@
 # setup.ps1 - Sets up Veeam VHC AWS on Windows
 # Usage: .\setup.ps1 -AlertUrl "https://ntfy.example.com/veeam-alerts"
 # Upgrade: .\setup.ps1 -Upgrade
-# Requires: veeam-vhc-aws.exe in the same directory as this script, or in dist\
+# Requires: PowerShell 7+ (pwsh), veeam-vhc-aws.exe in the same directory or in dist\
 
 param(
     [Parameter(Mandatory=$false)]
@@ -25,6 +25,19 @@ param(
     [Parameter(Mandatory=$false)]
     [switch]$NoSummary
 )
+
+# --- Require PowerShell 7+ ---
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    Write-Host "ERROR: PowerShell 7+ is required. You are running PowerShell $($PSVersionTable.PSVersion)." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Install PowerShell 7:" -ForegroundColor Yellow
+    Write-Host "  winget install Microsoft.PowerShell" -ForegroundColor Cyan
+    Write-Host "  -- or --" -ForegroundColor DarkGray
+    Write-Host "  https://aka.ms/install-powershell" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Then re-run this script with: pwsh -File `"$($MyInvocation.MyCommand.Path)`"" -ForegroundColor Yellow
+    exit 1
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -193,7 +206,7 @@ if ($Upgrade) {
                 $insertAt = $parentIdx + $ParentKey.Length + 1 + $nextKeyOffset
                 return $ConfigText.Substring(0, $insertAt) + "`r`n" + $Block + "`r`n" + $ConfigText.Substring($insertAt)
             } else {
-                # Parent is last section — append to end
+                # Parent is last section -- append to end
                 return $ConfigText.TrimEnd() + "`r`n" + $Block + "`r`n"
             }
         }
@@ -256,7 +269,7 @@ if ($Upgrade) {
             Write-Host "  [NEW] Retention session failure detection" -ForegroundColor Cyan
             Write-Host "        Detects failed retention tasks like 'Cannot find full backup'" -ForegroundColor DarkGray
             Write-Host "        and 'Failed to get last nas backup'. Reports all failures by" -ForegroundColor DarkGray
-            Write-Host "        default — you can mute specific jobs or error messages." -ForegroundColor DarkGray
+            Write-Host "        default -- you can mute specific jobs or error messages." -ForegroundColor DarkGray
             Write-Host ""
             $rsChoice = Read-Host "  Enable retention session monitoring? (y/n) [y]"
             if ($rsChoice -ne "n") {
@@ -325,7 +338,7 @@ if ($Upgrade) {
                     try {
                         Move-Item $log.FullName (Join-Path $logDir $log.Name) -Force -ErrorAction Stop
                     } catch {
-                        Write-Host "  WARNING: Could not move $($log.Name) — file may be in use" -ForegroundColor Yellow
+                        Write-Host "  WARNING: Could not move $($log.Name) -- file may be in use" -ForegroundColor Yellow
                     }
                 }
                 Write-Host "  -> Logs migrated to $logDir" -ForegroundColor Green
@@ -342,7 +355,7 @@ if ($Upgrade) {
         # ---- Add future feature checks here ----
 
     } else {
-        Write-Host "  Config not found at $configPath — skipping feature check." -ForegroundColor Yellow
+        Write-Host "  Config not found at $configPath -- skipping feature check." -ForegroundColor Yellow
         Write-Host "  Run setup.ps1 without -Upgrade to do a fresh install." -ForegroundColor Yellow
     }
 
@@ -427,7 +440,7 @@ if ($vbrUrl) {
     $vbrPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($vbrPass)
     )
-    # Escape backslashes for YAML double-quoted strings (e.g. DOMAIN\user → DOMAIN\\user)
+    # Escape backslashes for YAML double-quoted strings (e.g. DOMAIN\user -> DOMAIN\\user)
     $vbrUserYaml = $vbrUser -replace '\\', '\\'
     $vbrPassYaml = ConvertTo-ObfuscatedPassword $vbrPassPlain
     $vbrBlock = @"
@@ -797,7 +810,7 @@ if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
 $wrapperPath = Join-Path $InstallDir "Run-VhcAws.ps1"
 $alertUrlEscaped = if ($AlertUrl) { $AlertUrl } else { "" }
 $wrapperContent = @"
-# VHC AWS Monitor wrapper — alerts on task failure
+# VHC AWS Monitor wrapper -- alerts on task failure
 `$exePath = Join-Path `$PSScriptRoot "veeam-vhc-aws.exe"
 `$configPath = Join-Path `$PSScriptRoot "veeam-vhc-aws.yaml"
 & `$exePath all --config `$configPath
