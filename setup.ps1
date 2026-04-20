@@ -352,6 +352,60 @@ if ($Upgrade) {
             }
         }
 
+        # ---- Feature: API performance tuning (page_size, max_pages) ----
+        if ($configText -match '(?m)^global:' -and $configText -notmatch 'page_size') {
+            Write-Host ""
+            Write-Host "  [NEW] API performance tuning" -ForegroundColor Cyan
+            Write-Host "        Page size increased from 50 to 500 (10x fewer API calls)." -ForegroundColor DarkGray
+            Write-Host "        Circuit breaker added to prevent runaway pagination." -ForegroundColor DarkGray
+            Write-Host "        Adaptive lookback narrows session window after each success." -ForegroundColor DarkGray
+            Write-Host ""
+            $perfChoice = Read-Host "  Add page_size and max_pages to config? (y/n) [y]"
+            if ($perfChoice -ne "n") {
+                $perfBlock = "  page_size: 500`r`n  max_pages: 100"
+                $configText = Insert-ConfigBlock $configText "global" $perfBlock
+                Save-Config $configText
+                Write-Host "  -> page_size: 500 and max_pages: 100 added to global config" -ForegroundColor Green
+                $anyUpdates = $true
+            } else {
+                Write-Host "  -> Skipped. Defaults (page_size: 500, max_pages: 100) will be used." -ForegroundColor DarkGray
+            }
+        } else {
+            if ($configText -match 'page_size') {
+                Write-Host "  API performance tuning: already configured" -ForegroundColor DarkGray
+            }
+        }
+
+        # ---- Feature: timeout_seconds check (recommend 30 if >60) ----
+        if ($configText -match '(?m)timeout_seconds:\s*(\d+)') {
+            $currentTimeout = [int]$Matches[1]
+            if ($currentTimeout -gt 60) {
+                Write-Host ""
+                Write-Host "  [WARN] timeout_seconds is set to $currentTimeout" -ForegroundColor Yellow
+                Write-Host "         High timeout values (>60s) can cause multi-hour run times on busy" -ForegroundColor DarkGray
+                Write-Host "         VBR servers. With adaptive lookback and larger page sizes, a 30s" -ForegroundColor DarkGray
+                Write-Host "         timeout is recommended. Failed pages will be retried automatically." -ForegroundColor DarkGray
+                Write-Host ""
+                $toChoice = Read-Host "  Reduce timeout_seconds to 30? (y/n) [y]"
+                if ($toChoice -ne "n") {
+                    $configText = $configText -replace '(?m)(timeout_seconds:\s*)\d+', '${1}30'
+                    Save-Config $configText
+                    Write-Host "  -> timeout_seconds set to 30" -ForegroundColor Green
+                    $anyUpdates = $true
+                } else {
+                    Write-Host "  -> Keeping timeout_seconds: $currentTimeout" -ForegroundColor DarkGray
+                }
+            }
+        }
+
+        # ---- Feature: adaptive lookback overlap config ----
+        # Adaptive lookback is automatic (no config needed), but inform the user
+        if ($configText -notmatch 'lookback_overlap_minutes') {
+            Write-Host "  adaptive lookback: enabled automatically (2 min overlap)" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  adaptive lookback: already configured" -ForegroundColor DarkGray
+        }
+
         # ---- Add future feature checks here ----
 
     } else {
@@ -707,6 +761,8 @@ global:
   timeout_seconds: 30
   retry_count: 2
   retry_delay_seconds: 5
+  page_size: 500
+  max_pages: 100
   state_file: "$($statePath -replace '\\', '\\')"
   logging:
     level: INFO

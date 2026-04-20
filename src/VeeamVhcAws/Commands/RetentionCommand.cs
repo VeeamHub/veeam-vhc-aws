@@ -16,7 +16,7 @@ public static class RetentionCommand
             try
             {
                 var (cfg, servers, pe, dispatcher, state) = CommandHelpers.LoadAndSetup(config);
-                var results = MonitorRunner.RunAllServers(servers, cfg, pe, monitorFilter: "retention");
+                var results = MonitorRunner.RunAllServers(servers, cfg, pe, monitorFilter: "retention", findingState: state);
                 if (results.Count == 0)
                 {
                     Console.Error.WriteLine("No VBR servers configured for retention.");

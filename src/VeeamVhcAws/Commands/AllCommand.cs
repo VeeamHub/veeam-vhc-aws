@@ -24,7 +24,7 @@ public static class AllCommand
                     return;
                 }
 
-                var results = MonitorRunner.RunAllServers(servers, cfg, pe);
+                var results = MonitorRunner.RunAllServers(servers, cfg, pe, findingState: state);
                 results = CrossCorrelator.Correlate(results);
                 CommandHelpers.EmitWithState(dispatcher, results, state);
                 Environment.ExitCode = CommandHelpers.WorstExitCode(results);

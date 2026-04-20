@@ -5,6 +5,7 @@ using Serilog;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
+using VeeamVhcAws.Core.State;
 using VeeamVhcAws.Infrastructure;
 
 namespace VeeamVhcAws.Monitors;
@@ -25,7 +26,7 @@ public class RetentionMonitor : IMonitor
 
     private Dictionary<string, object> GetConfig() => _config.GetSection("retention");
 
-    public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine)
+    public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine, FindingState? findingState = null)
     {
         var sw = Stopwatch.StartNew();
         var findings = new List<Finding>();
@@ -94,9 +95,12 @@ public class RetentionMonitor : IMonitor
         }
 
         // --- 3. Get restore points (paginated) ---
+        var rpSw = Stopwatch.StartNew();
         var allRestorePoints = new List<Dictionary<string, object>>();
         int offset = 0;
         int limit = 500;
+        int rpPages = 0;
+        int maxRpPages = 100;
         while (true)
         {
             List<Dictionary<string, object>> batch;
@@ -106,11 +110,20 @@ public class RetentionMonitor : IMonitor
                 errors.Add($"Failed to fetch restore points at offset {offset}: {e.Message}");
                 break;
             }
+            rpPages++;
             if (batch.Count == 0) break;
             allRestorePoints.AddRange(batch);
             if (batch.Count < limit) break;
+            if (rpPages >= maxRpPages)
+            {
+                Logger.Warning("Restore points pagination circuit breaker: stopped after {Pages} pages ({Count} points)",
+                    maxRpPages, allRestorePoints.Count);
+                break;
+            }
             offset += limit;
         }
+        Logger.Information("Fetched {Count} restore points in {Pages} pages ({Duration}ms)",
+            allRestorePoints.Count, rpPages, rpSw.ElapsedMilliseconds);
 
         // Group restore points by VM/backup object
         var vmPoints = new Dictionary<string, List<Dictionary<string, object>>>();
@@ -280,7 +293,27 @@ public class RetentionMonitor : IMonitor
         }
 
         // --- 6. Retention session failure detection ---
-        var sessionLookbackHours = cfg.Get("session_lookback_hours", 24);
+        var maxSessionLookbackHours = cfg.Get("session_lookback_hours", 24);
+        var overlapMinutes = cfg.Get("lookback_overlap_minutes", 2);
+        var lastSuccess = findingState?.GetLastSuccessTime(serverContext.Name, "retention");
+
+        int sessionLookbackHours;
+        if (lastSuccess.HasValue)
+        {
+            var elapsed = DateTime.UtcNow - lastSuccess.Value;
+            sessionLookbackHours = Math.Min(
+                (int)Math.Ceiling(elapsed.TotalHours + overlapMinutes / 60.0),
+                maxSessionLookbackHours);
+            sessionLookbackHours = Math.Max(sessionLookbackHours, 1);
+            Logger.Information("Adaptive lookback for retention on '{Server}': {Hours}h (last success {Elapsed:F1}h ago)",
+                serverContext.Name, sessionLookbackHours, elapsed.TotalHours);
+        }
+        else
+        {
+            sessionLookbackHours = maxSessionLookbackHours;
+            Logger.Information("First run lookback for retention on '{Server}': {Hours}h (no prior success)",
+                serverContext.Name, sessionLookbackHours);
+        }
 
         var defaultSessionTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {

@@ -3,6 +3,7 @@ using Serilog;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
+using VeeamVhcAws.Core.State;
 using VeeamVhcAws.Infrastructure;
 
 namespace VeeamVhcAws.Monitors;
@@ -22,7 +23,7 @@ public class RepoHealthMonitor : IMonitor
 
     private Dictionary<string, object> GetConfig() => _config.GetSection("repo_health");
 
-    public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine)
+    public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine, FindingState? findingState = null)
     {
         var sw = Stopwatch.StartNew();
         var findings = new List<Finding>();
@@ -100,8 +101,29 @@ public class RepoHealthMonitor : IMonitor
         }
 
         // --- 2. Session-based repo issue detection ---
-        var lookbackHours = cfg.Get("session_lookback_hours",
+        var maxLookbackHours = cfg.Get("session_lookback_hours",
             cfg.Get("external_maintenance_lookback_hours", 24));
+        var overlapMinutes = cfg.Get("lookback_overlap_minutes", 2);
+        var lastSuccess = findingState?.GetLastSuccessTime(serverContext.Name, "repo_health");
+
+        int lookbackHours;
+        if (lastSuccess.HasValue)
+        {
+            var elapsed = DateTime.UtcNow - lastSuccess.Value;
+            lookbackHours = Math.Min(
+                (int)Math.Ceiling(elapsed.TotalHours + overlapMinutes / 60.0),
+                maxLookbackHours);
+            lookbackHours = Math.Max(lookbackHours, 1);
+            Logger.Information("Adaptive lookback for repo_health on '{Server}': {Hours}h (last success {Elapsed:F1}h ago)",
+                serverContext.Name, lookbackHours, elapsed.TotalHours);
+        }
+        else
+        {
+            lookbackHours = maxLookbackHours;
+            Logger.Information("First run lookback for repo_health on '{Server}': {Hours}h (no prior success)",
+                serverContext.Name, lookbackHours);
+        }
+
         int credentialExpiredCount = 0;
         int sessionWarningCount = 0;
 

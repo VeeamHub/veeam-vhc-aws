@@ -4,6 +4,7 @@ using Serilog;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
+using VeeamVhcAws.Core.State;
 using VeeamVhcAws.Infrastructure;
 
 namespace VeeamVhcAws.Monitors;
@@ -107,7 +108,7 @@ public class WorkerHealthMonitor : IMonitor
         return filtered;
     }
 
-    public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine)
+    public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine, FindingState? findingState = null)
     {
         var sw = Stopwatch.StartNew();
         var findings = new List<Finding>();

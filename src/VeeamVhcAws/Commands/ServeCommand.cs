@@ -32,7 +32,7 @@ public static class ServeCommand
             while (true)
             {
                 var cycleStart = System.Diagnostics.Stopwatch.StartNew();
-                var results = MonitorRunner.RunAllServers(servers, cfg, pe);
+                var results = MonitorRunner.RunAllServers(servers, cfg, pe, findingState: state);
                 results = CrossCorrelator.Correlate(results);
                 CommandHelpers.EmitWithState(dispatcher, results, state);
 

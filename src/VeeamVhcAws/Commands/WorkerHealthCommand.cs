@@ -16,7 +16,7 @@ public static class WorkerHealthCommand
             try
             {
                 var (cfg, servers, pe, dispatcher, state) = CommandHelpers.LoadAndSetup(config);
-                var results = MonitorRunner.RunAllServers(servers, cfg, pe, monitorFilter: "worker_health");
+                var results = MonitorRunner.RunAllServers(servers, cfg, pe, monitorFilter: "worker_health", findingState: state);
                 if (results.Count == 0)
                 {
                     Console.Error.WriteLine("No VBAWS servers configured for worker-health.");

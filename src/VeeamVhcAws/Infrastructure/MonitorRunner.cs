@@ -2,6 +2,7 @@ using Serilog;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
+using VeeamVhcAws.Core.State;
 using VeeamVhcAws.Monitors;
 
 namespace VeeamVhcAws.Infrastructure;
@@ -15,7 +16,8 @@ public static class MonitorRunner
         List<ServerContext> servers,
         Dictionary<string, object> config,
         PatternEngine? patternEngine,
-        string? monitorFilter = null)
+        string? monitorFilter = null,
+        FindingState? findingState = null)
     {
         var allResults = new List<MonitorResult>();
 
@@ -25,7 +27,7 @@ public static class MonitorRunner
                 servers.Count, ParallelThreshold);
             var maxWorkers = Math.Min(servers.Count, 20);
             var tasks = servers.Select(ctx =>
-                Task.Run(() => RunMonitorsForServer(ctx, config, patternEngine, monitorFilter))
+                Task.Run(() => RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState))
             ).ToArray();
 
             try
@@ -50,7 +52,7 @@ public static class MonitorRunner
         {
             foreach (var ctx in servers)
             {
-                var results = RunMonitorsForServer(ctx, config, patternEngine, monitorFilter);
+                var results = RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState);
                 allResults.AddRange(results);
             }
         }
@@ -62,7 +64,8 @@ public static class MonitorRunner
         ServerContext serverCtx,
         Dictionary<string, object> config,
         PatternEngine? patternEngine,
-        string? monitorFilter)
+        string? monitorFilter,
+        FindingState? findingState)
     {
         var applicable = GetApplicableMonitors(monitorFilter, serverCtx, config);
         if (applicable.Count == 0)
@@ -75,7 +78,7 @@ public static class MonitorRunner
             {
                 var monitor = factory(config);
                 Logger.Information("Starting {Monitor} on server '{Server}'", name, serverCtx.Name);
-                var result = monitor.Run(serverCtx, patternEngine);
+                var result = monitor.Run(serverCtx, patternEngine, findingState);
                 PrefixFindings(result, serverCtx.Name);
 
                 // If a monitor returned errors but severity is OK, escalate
@@ -95,6 +98,13 @@ public static class MonitorRunner
                 Logger.Information("{Monitor} on '{Server}' completed: severity={Severity}, findings={Findings}, errors={Errors}, duration={Duration}ms",
                     name, serverCtx.Name, result.OverallSeverity.ToLowerString(),
                     result.Findings.Count, result.Errors.Count, result.DurationMs);
+
+                // Track last successful run time for adaptive lookback
+                if (result.Errors.Count == 0 && findingState != null)
+                {
+                    findingState.SetLastSuccessTime(serverCtx.Name, name, DateTime.UtcNow);
+                    Logger.Debug("Recorded last success time for {Monitor} on '{Server}'", name, serverCtx.Name);
+                }
             }
             catch (Exception e)
             {

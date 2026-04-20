@@ -20,6 +20,8 @@ public static class ServerContextBuilder
         var timeout = globalCfg.Get("timeout_seconds", 30);
         var retryCount = globalCfg.Get("retry_count", 2);
         var retryDelay = globalCfg.Get("retry_delay_seconds", 5);
+        var pageSize = globalCfg.Get("page_size", 500);
+        var maxPages = globalCfg.Get("max_pages", 100);
 
         IVbrClient? vbrClient = null;
         IVbawsClient? vbawsClient = null;
@@ -28,7 +30,7 @@ public static class ServerContextBuilder
         {
             var apiVersion = serverCfg.Get("api_version", "1.3-rev1");
             var auth = new VbrAuth(url, username, password, apiVersion, verifySsl);
-            vbrClient = new VbrClient(url, auth, verifySsl, timeout, retryCount, retryDelay, apiVersion);
+            vbrClient = new VbrClient(url, auth, verifySsl, timeout, retryCount, retryDelay, apiVersion, pageSize, maxPages);
         }
         else if (serverType == "vbaws")
         {

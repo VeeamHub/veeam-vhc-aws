@@ -409,4 +409,137 @@ public class FindingStateTests
             if (File.Exists(statePath)) File.Delete(statePath);
         }
     }
+
+    [Fact]
+    public void GetLastSuccessTimeReturnsNullWhenNoEntry()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var state = new FindingState(statePath);
+            var result = state.GetLastSuccessTime("server1", "repo_health");
+            Assert.Null(result);
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void SetAndGetLastSuccessTimeRoundTrips()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var state = new FindingState(statePath);
+            var now = DateTime.UtcNow;
+            state.SetLastSuccessTime("server1", "repo_health", now);
+
+            // Re-load from disk
+            var state2 = new FindingState(statePath);
+            var result = state2.GetLastSuccessTime("server1", "repo_health");
+
+            Assert.NotNull(result);
+            // Allow 1 second tolerance for serialization rounding
+            Assert.True(Math.Abs((result.Value - now).TotalSeconds) < 1,
+                $"Expected ~{now:O} but got {result.Value:O}");
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void LastSuccessTimePersistedAsIso8601InJson()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var state = new FindingState(statePath);
+            var now = new DateTime(2026, 4, 15, 10, 23, 27, DateTimeKind.Utc);
+            state.SetLastSuccessTime("vbr01", "repo_health", now);
+
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            var lastSuccess = doc.RootElement.GetProperty("lastSuccess");
+            var value = lastSuccess.GetProperty("vbr01:repo_health").GetString();
+
+            Assert.NotNull(value);
+            Assert.Contains("2026-04-15", value);
+            Assert.Contains("10:23:27", value);
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void LastSuccessTimeSeparatePerServerAndMonitor()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            var state = new FindingState(statePath);
+            var time1 = new DateTime(2026, 4, 15, 8, 0, 0, DateTimeKind.Utc);
+            var time2 = new DateTime(2026, 4, 15, 9, 0, 0, DateTimeKind.Utc);
+            var time3 = new DateTime(2026, 4, 15, 10, 0, 0, DateTimeKind.Utc);
+
+            state.SetLastSuccessTime("server1", "repo_health", time1);
+            state.SetLastSuccessTime("server1", "retention", time2);
+            state.SetLastSuccessTime("server2", "repo_health", time3);
+
+            var state2 = new FindingState(statePath);
+            var r1 = state2.GetLastSuccessTime("server1", "repo_health");
+            var r2 = state2.GetLastSuccessTime("server1", "retention");
+            var r3 = state2.GetLastSuccessTime("server2", "repo_health");
+
+            Assert.NotNull(r1);
+            Assert.NotNull(r2);
+            Assert.NotNull(r3);
+            Assert.True(Math.Abs((r1.Value - time1).TotalSeconds) < 1);
+            Assert.True(Math.Abs((r2.Value - time2).TotalSeconds) < 1);
+            Assert.True(Math.Abs((r3.Value - time3).TotalSeconds) < 1);
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public void LastSuccessTimeDoesNotAffectExistingState()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            // Create state with a finding first
+            var state = new FindingState(statePath);
+            var results = new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 100, Severity.Warning,
+                    new List<Finding>
+                    {
+                        new(Severity.Warning, "repo:Test", "Low space")
+                    }, server: "server1")
+            };
+            state.ProcessResults(results);
+
+            // Now set last success
+            state.SetLastSuccessTime("server1", "repo_health", DateTime.UtcNow);
+
+            // Reload and verify both exist
+            var json = File.ReadAllText(statePath);
+            var doc = JsonDocument.Parse(json);
+            Assert.True(doc.RootElement.TryGetProperty("findings", out _));
+            Assert.True(doc.RootElement.TryGetProperty("lastSuccess", out _));
+            Assert.True(doc.RootElement.TryGetProperty("captured_errors", out _));
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
 }

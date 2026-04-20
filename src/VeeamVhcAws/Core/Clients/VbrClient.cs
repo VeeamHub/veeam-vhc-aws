@@ -16,10 +16,12 @@ public class VbrClient : IVbrClient
     private readonly int _retryCount;
     private readonly int _retryDelay;
     private readonly string _apiVersion;
+    private readonly int _pageSize;
+    private readonly int _maxPages;
 
     public VbrClient(string baseUrl, VbrAuth auth, bool verifySsl = true,
         int timeout = 30, int retryCount = 2, int retryDelay = 5,
-        string apiVersion = "1.3-rev1")
+        string apiVersion = "1.3-rev1", int pageSize = 500, int maxPages = 100)
     {
         _baseUrl = baseUrl.TrimEnd('/');
         _auth = auth;
@@ -28,6 +30,8 @@ public class VbrClient : IVbrClient
         _retryCount = retryCount;
         _retryDelay = retryDelay;
         _apiVersion = apiVersion;
+        _pageSize = pageSize;
+        _maxPages = maxPages;
     }
 
     private HttpClient CreateClient()
@@ -167,7 +171,7 @@ public class VbrClient : IVbrClient
         var createdAfter = cutoff.ToString("yyyy-MM-ddTHH:mm:ssZ");
         var allSessions = new List<Dictionary<string, object>>();
         int offset = 0;
-        int pageSize = 50;
+        int pageCount = 0;
 
         while (true)
         {
@@ -175,19 +179,27 @@ public class VbrClient : IVbrClient
                 new Dictionary<string, string>
                 {
                     ["createdAfter"] = createdAfter,
-                    ["limit"] = pageSize.ToString(),
+                    ["limit"] = _pageSize.ToString(),
                     ["skip"] = offset.ToString()
                 });
             var page = ExtractDataList(result);
+            pageCount++;
             if (page.Count == 0)
                 break;
             allSessions.AddRange(page);
-            if (page.Count < pageSize)
+            if (page.Count < _pageSize)
                 break;
-            offset += pageSize;
+            if (pageCount >= _maxPages)
+            {
+                Logger.Warning("Session pagination circuit breaker: stopped after {Pages} pages ({Count} sessions)",
+                    _maxPages, allSessions.Count);
+                break;
+            }
+            offset += _pageSize;
         }
 
-        Logger.Debug("Fetched {Count} sessions total (paginated)", allSessions.Count);
+        Logger.Information("Fetched {Count} sessions in {Pages} pages (lookback={Hours}h)",
+            allSessions.Count, pageCount, lookbackHours);
         return allSessions;
     }
 
@@ -199,10 +211,11 @@ public class VbrClient : IVbrClient
 
     public List<Dictionary<string, object>> GetBackups()
     {
+        var sw = Stopwatch.StartNew();
         var allBackups = new List<Dictionary<string, object>>();
         int offset = 0;
-        int pageSize = 50;
         int skipped = 0;
+        int pages = 0;
 
         while (true)
         {
@@ -211,22 +224,29 @@ public class VbrClient : IVbrClient
                 var result = Request("GET", "/api/v1/backups",
                     new Dictionary<string, string>
                     {
-                        ["limit"] = pageSize.ToString(),
+                        ["limit"] = _pageSize.ToString(),
                         ["skip"] = offset.ToString()
                     });
                 var page = ExtractDataList(result);
+                pages++;
                 if (page.Count == 0)
                     break;
                 allBackups.AddRange(page);
-                if (page.Count < pageSize)
+                if (page.Count < _pageSize)
                     break;
-                offset += pageSize;
+                if (pages >= _maxPages)
+                {
+                    Logger.Warning("Backups pagination circuit breaker: stopped after {Pages} pages ({Count} backups)",
+                        _maxPages, allBackups.Count);
+                    break;
+                }
+                offset += _pageSize;
             }
             catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.InternalServerError)
             {
                 Logger.Warning("VBR /api/v1/backups batch failed at offset {Offset} — falling back to per-item fetch", offset);
                 bool endReached = false;
-                for (int i = 0; i < pageSize; i++)
+                for (int i = 0; i < _pageSize; i++)
                 {
                     try
                     {
@@ -250,15 +270,15 @@ public class VbrClient : IVbrClient
                         Logger.Warning("VBR /api/v1/backups entry at offset {Offset} cannot be serialized — skipped", offset + i);
                     }
                 }
+                pages++;
                 if (endReached) break;
-                offset += pageSize;
+                offset += _pageSize;
             }
         }
 
-        if (skipped > 0)
-            Logger.Information("Fetched {Count} backups, skipped {Skipped} unserializable entries", allBackups.Count, skipped);
-        else
-            Logger.Debug("Fetched {Count} backups total (paginated)", allBackups.Count);
+        Logger.Information("Fetched {Count} backups in {Pages} pages ({Duration}ms){Skipped}",
+            allBackups.Count, pages, sw.ElapsedMilliseconds,
+            skipped > 0 ? $", skipped {skipped} unserializable" : "");
 
         return allBackups;
     }

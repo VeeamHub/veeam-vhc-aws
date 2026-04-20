@@ -24,7 +24,7 @@ public static class RepoHealthCommand
         try
         {
             var (cfg, servers, pe, dispatcher, state) = CommandHelpers.LoadAndSetup(configArg);
-            var results = MonitorRunner.RunAllServers(servers, cfg, pe, monitorFilter: monitorName);
+            var results = MonitorRunner.RunAllServers(servers, cfg, pe, monitorFilter: monitorName, findingState: state);
             if (results.Count == 0)
             {
                 Console.Error.WriteLine(noServersMsg);

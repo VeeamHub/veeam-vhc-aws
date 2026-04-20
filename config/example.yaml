@@ -4,6 +4,10 @@ global:
   timeout_seconds: 30
   retry_count: 2
   retry_delay_seconds: 5
+  # Page size for paginated VBR API calls (sessions, backups). Default: 500
+  page_size: 500
+  # Max pages per paginated API call before circuit-breaking. Default: 100
+  max_pages: 100
 
   logging:
     # Log level: DEBUG, INFO, WARNING, ERROR (default: DEBUG)

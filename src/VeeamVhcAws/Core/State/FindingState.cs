@@ -125,6 +125,37 @@ public class FindingState
         return empty;
     }
 
+    private Dictionary<string, object> GetLastSuccess()
+    {
+        if (_state.TryGetValue("lastSuccess", out var ls) && ls is Dictionary<string, object> lastSuccess)
+            return lastSuccess;
+        var empty = new Dictionary<string, object>();
+        _state["lastSuccess"] = empty;
+        return empty;
+    }
+
+    public DateTime? GetLastSuccessTime(string server, string monitor)
+    {
+        var lastSuccess = GetLastSuccess();
+        var key = $"{server}:{monitor}";
+        if (lastSuccess.TryGetValue(key, out var val) && val is string s)
+        {
+            if (DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
+                    out var dt))
+                return dt;
+        }
+        return null;
+    }
+
+    public void SetLastSuccessTime(string server, string monitor, DateTime time)
+    {
+        var lastSuccess = GetLastSuccess();
+        var key = $"{server}:{monitor}";
+        lastSuccess[key] = time.ToUniversalTime().ToString("O");
+        Save();
+    }
+
     public (List<MonitorResult> FilteredResults, List<Finding> Resolved) ProcessResults(List<MonitorResult> results)
     {
         var now = DateTime.UtcNow.ToString("O");

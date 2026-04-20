@@ -36,6 +36,7 @@
 - **Worker Health** -- Analyzes VBAWS session failure rates, detects subnet exhaustion, credential failures, and silent retention failures
 - **Infrastructure Health** -- Query managed servers (vCenter, ESXi, Windows/Linux hosts) for availability status, browse vCenter inventory (VMs, clusters, datastores), and check TLS certificate expiry via the VBR REST API
 - **Cross-Correlation** -- Links findings across monitors per-server to surface root causes (e.g., credential expiry causing retention failures)
+- **Adaptive Lookback** -- After each successful run, the session lookback window narrows to just since the last success + overlap buffer, dramatically reducing API calls on busy VBR servers. Falls back to full window on failure or first run.
 - **Flexible Output** -- JSON, webhooks (Slack/Teams/PagerDuty/ntfy), Prometheus metrics, email
 - **Logging** -- Verbose logging with time-based rotation, disk space alerts, and credential redaction
 
@@ -183,6 +184,27 @@ Config file resolution order:
 3. `./veeam-vhc-aws.yaml` in the current directory
 
 See [`config/example.yaml`](config/example.yaml) for the full configuration reference including server setup, thresholds, output handlers, and error patterns.
+
+#### Performance Tuning
+
+For environments with busy VBR servers or large session volumes, these global settings control API pagination behavior:
+
+```yaml
+global:
+  timeout_seconds: 30       # Per-request timeout (default: 30). Avoid values >60 on slow APIs.
+  page_size: 500            # Items per API page (default: 500, was 50 in older versions)
+  max_pages: 100            # Circuit breaker: max pages before stopping (default: 100)
+```
+
+**Adaptive lookback** is enabled automatically. After each successful monitor run, the session lookback window narrows from the configured max (e.g. 24h) down to just the time since the last success + a 2-minute overlap buffer. This means a monitor running every 5 minutes only fetches ~5 minutes of sessions instead of 24 hours, reducing API load by orders of magnitude. The overlap buffer is configurable per monitor:
+
+```yaml
+repo_health:
+  session_lookback_hours: 24      # Max lookback (used on first run or after failure)
+  lookback_overlap_minutes: 2     # Overlap buffer for adaptive window (default: 2)
+```
+
+If a run fails (errors fetching data), the lookback window stays wide until the next fully clean run.
 
 #### Multi-Server
 
