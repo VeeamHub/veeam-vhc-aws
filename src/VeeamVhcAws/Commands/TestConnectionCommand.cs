@@ -72,7 +72,7 @@ public static class TestConnectionCommand
                 var host = output.Get("smtp_host", "");
                 var port = output.Get("smtp_port", 587);
                 var username = output.Get("smtp_username", "");
-                var password = output.Get("smtp_password", "");
+                var password = PasswordObfuscator.Deobfuscate(output.Get("smtp_password", ""));
                 var useTls = output.Get("use_tls", true);
                 var label = $"{host}:{port}";
 
@@ -81,10 +81,9 @@ public static class TestConnectionCommand
                     using var client = new SmtpClient();
                     client.Connect(host, port, useTls
                         ? MailKit.Security.SecureSocketOptions.StartTls
-                        : MailKit.Security.SecureSocketOptions.Auto);
+                        : MailKit.Security.SecureSocketOptions.None);
                     if (!string.IsNullOrEmpty(username))
                         client.Authenticate(username, password);
-                    var caps = client.Capabilities.ToString();
                     client.Disconnect(true);
                     table.AddRow(label, "SMTP", "[green]Connected[/]",
                         !string.IsNullOrEmpty(username) ? "Auth OK" : "No auth configured");

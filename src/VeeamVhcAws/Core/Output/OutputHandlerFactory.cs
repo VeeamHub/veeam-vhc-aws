@@ -29,7 +29,7 @@ public static class OutputHandlerFactory
             ParseToAddrs(cfg),
             cfg.Get("min_severity", "critical"),
             cfg.Get("smtp_username", ""),
-            cfg.Get("smtp_password", ""),
+            PasswordObfuscator.Deobfuscate(cfg.Get("smtp_password", "")),
             cfg.Get("use_tls", true)),
     };
 

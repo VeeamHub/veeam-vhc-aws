@@ -150,7 +150,7 @@ public class EmailHandler : IOutputHandler
         try
         {
             using var client = new SmtpClient();
-            client.Connect(_smtpHost, _smtpPort, _useTls ? MailKit.Security.SecureSocketOptions.StartTls : MailKit.Security.SecureSocketOptions.Auto);
+            client.Connect(_smtpHost, _smtpPort, _useTls ? MailKit.Security.SecureSocketOptions.StartTls : MailKit.Security.SecureSocketOptions.None);
             if (!string.IsNullOrEmpty(_smtpUsername))
                 client.Authenticate(_smtpUsername, _smtpPassword);
             client.Send(message);

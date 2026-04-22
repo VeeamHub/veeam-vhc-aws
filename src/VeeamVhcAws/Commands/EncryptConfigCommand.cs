@@ -6,10 +6,8 @@ namespace VeeamVhcAws.Commands;
 
 public static class EncryptConfigCommand
 {
-    // Matches lines like:   password: "somevalue"  or   password: somevalue
-    // Skips lines where the value already starts with ENC:
-    private static readonly Regex PasswordLineRegex = new(
-        @"^(\s*password:\s*)""?(?!ENC:)([^""#\n]+?)""?\s*$",
+    internal static readonly Regex PasswordLineRegex = new(
+        @"^(\s*(?:smtp_)?password:\s*)(?![ \t]*""?ENC:)""?([^""#\n]+?)""?\s*$",
         RegexOptions.Compiled);
 
     public static Command Create()

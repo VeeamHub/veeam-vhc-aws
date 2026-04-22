@@ -100,6 +100,9 @@ output:
   #   from_addr: veeam-vhc-aws@example.com
   #   to_addrs: ["ops@example.com"]
   #   min_severity: warning
+  #   smtp_username: alerts@example.com
+  #   smtp_password: ""   # run 'veeam-vhc-aws encrypt-config' to obfuscate
+  #   use_tls: true
 
 repo_health:
   enabled: true
