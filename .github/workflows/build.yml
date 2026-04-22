@@ -24,7 +24,7 @@ jobs:
         run: dotnet build src/VeeamVhcAws/VeeamVhcAws.csproj --no-restore -c Release
 
       - name: Test
-        run: dotnet test tests/VeeamVhcAws.Tests/VeeamVhcAws.Tests.csproj --no-build -c Release -v normal
+        run: dotnet test tests/VeeamVhcAws.Tests/VeeamVhcAws.Tests.csproj -c Release -v normal
 
   build-exe:
     name: Build win-x64 & VT Scan
