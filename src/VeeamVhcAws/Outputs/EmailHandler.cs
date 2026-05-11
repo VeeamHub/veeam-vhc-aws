@@ -136,6 +136,14 @@ public class EmailHandler : IOutputHandler
             return;
         }
 
+        var hasContent = results.Any(r => r.Findings.Any(f => f.Severity != Severity.Ok))
+                         || results.Any(r => r.Errors.Any());
+        if (!hasContent)
+        {
+            Logger.Information("Email skipped — no findings or errors to report");
+            return;
+        }
+
         var html = BuildHtml(results);
 
         var message = new MimeMessage();

@@ -249,6 +249,11 @@ public class RetentionMonitor : IMonitor
         int orphanCount = 0;
         if (orphanDetection)
         {
+            // Group by backup name — VBR can return multiple backup objects sharing the same name
+            // (different IDs, same job). Deduplicate to avoid repeating identical-looking findings.
+            var orphanGroups = new Dictionary<string, (List<string> BackupIds, int TotalRpCount, HashSet<string> Workloads)>(
+                StringComparer.OrdinalIgnoreCase);
+
             foreach (var (backupId, backupInfo) in backupMap)
             {
                 var jobId = backupInfo.GetValueOrDefault("job_id", "")?.ToString() ?? "";
@@ -261,8 +266,7 @@ public class RetentionMonitor : IMonitor
                 var orphanPoints = allRestorePoints
                     .Where(rp => rp.GetApiString("backupId", "BackupId", "") == backupId)
                     .ToList();
-                var rpCount = orphanPoints.Count;
-                var workloadNames = orphanPoints
+                var pointWorkloads = orphanPoints
                     .Select(rp =>
                     {
                         var n = rp.GetApiString("name", "Name", "");
@@ -274,17 +278,41 @@ public class RetentionMonitor : IMonitor
                         return n;
                     })
                     .Where(n => !string.IsNullOrEmpty(n))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(n => n)
                     .ToList();
-                var workloadList = workloadNames.Count > 0 ? string.Join(", ", workloadNames) : "unknown";
+
+                if (!orphanGroups.TryGetValue(bName, out var grp))
+                    grp = (new List<string>(), 0, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                grp.BackupIds.Add(backupId);
+                grp.Workloads.UnionWith(pointWorkloads);
+                orphanGroups[bName] = (grp.BackupIds, grp.TotalRpCount + orphanPoints.Count, grp.Workloads);
+            }
+
+            foreach (var kvp in orphanGroups)
+            {
+                var bName = kvp.Key;
+                var (backupIds, totalRpCount, workloads) = kvp.Value;
+
+                if (totalRpCount == 0)
+                {
+                    Logger.Information(
+                        "Ghost orphan '{Name}' ({Count} backup object(s), 0 restore points) — logged only, no finding",
+                        bName, backupIds.Count);
+                    continue;
+                }
+
+                var sortedWorkloads = workloads.OrderBy(n => n).ToList();
+                var countSuffix = backupIds.Count > 1 ? $" (x{backupIds.Count})" : "";
+                var workloadPart = sortedWorkloads.Count > 0
+                    ? $" Workloads: {string.Join(", ", sortedWorkloads)}"
+                    : "";
                 orphanCount++;
                 findings.Add(new Finding(Severity.Warning, $"backup:{bName}",
-                    $"Orphaned backup '{bName}': {rpCount} restore points, no active job. Workloads: {workloadList}",
+                    $"Orphaned backup '{bName}': {totalRpCount} restore points, no active job{countSuffix}.{workloadPart}",
                     new Dictionary<string, object>
                     {
-                        ["backup_id"] = backupId, ["job_id"] = jobId, ["restore_point_count"] = rpCount,
-                        ["workloads"] = workloadNames,
+                        ["backup_ids"] = backupIds,
+                        ["restore_point_count"] = totalRpCount,
+                        ["workloads"] = sortedWorkloads,
                     }));
             }
 
