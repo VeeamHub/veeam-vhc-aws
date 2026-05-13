@@ -1,0 +1,294 @@
+@page "/thresholds"
+@rendermode InteractiveServer
+@inject ConfigService Config
+
+<PageTitle>Thresholds — Veeam VHC AWS</PageTitle>
+
+<h1>Alert Thresholds</h1>
+<p class="muted">Per-monitor alert severity thresholds. Changes apply on the next scheduled run.</p>
+
+@if (_cfg is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div class="tab-nav">
+        <button class="tab @(_activeTab == "repo" ? "active" : "")" @onclick='() => _activeTab = "repo"'>Repo Health</button>
+        <button class="tab @(_activeTab == "retention" ? "active" : "")" @onclick='() => _activeTab = "retention"'>Retention</button>
+        <button class="tab @(_activeTab == "worker" ? "active" : "")" @onclick='() => _activeTab = "worker"'>Worker Health</button>
+    </div>
+
+    @if (_activeTab == "repo")
+    {
+        <section class="form-section">
+            <h2>Repo Health</h2>
+            <div class="form-row">
+                <label><input type="checkbox" @bind="_repoEnabled" /> Enabled</label>
+            </div>
+            <div class="form-row">
+                <label>Free space warning threshold (% free)</label>
+                <input type="number" min="0" max="100" @bind="_freeWarnPct" />
+            </div>
+            <div class="form-row">
+                <label>Free space critical threshold (% free)</label>
+                <input type="number" min="0" max="100" @bind="_freeCritPct" />
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" @bind="_includeExternalRepos" /> Include external repositories</label>
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" @bind="_checkExternalMaintenance" /> Check external maintenance sessions</label>
+            </div>
+            <div class="form-row">
+                <label>Session lookback (hours)</label>
+                <input type="number" min="1" max="720" @bind="_repoLookback" />
+            </div>
+            <div class="form-row">
+                <label>Lookback overlap (minutes)</label>
+                <input type="number" min="0" max="60" @bind="_repoOverlap" />
+            </div>
+            <div class="form-actions">
+                <button class="btn" @onclick="SaveRepo">Save Repo Health</button>
+            </div>
+        </section>
+    }
+    else if (_activeTab == "retention")
+    {
+        <section class="form-section">
+            <h2>Retention</h2>
+            <div class="form-row">
+                <label><input type="checkbox" @bind="_retentionEnabled" /> Enabled</label>
+            </div>
+            <div class="form-row">
+                <label>Overage multiplier <span class="muted">(restore points beyond policy × this = warning)</span></label>
+                <input type="number" min="1" max="10" step="0.1" @bind="_overageMultiplier" />
+            </div>
+            <div class="form-row">
+                <label>Max-age multiplier <span class="muted">(age beyond policy × this = warning)</span></label>
+                <input type="number" min="1" max="10" step="0.1" @bind="_maxAgeMultiplier" />
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" @bind="_orphanDetection" /> Enable orphan backup detection</label>
+            </div>
+            <div class="form-row">
+                <label>Session lookback (hours)</label>
+                <input type="number" min="1" max="720" @bind="_retentionLookback" />
+            </div>
+            <div class="form-row">
+                <label>Excluded backups <span class="muted">(comma-separated names)</span></label>
+                <input type="text" @bind="_excludeBackups" placeholder="backup-archive-2023, snapshot-old" />
+            </div>
+            <div class="form-actions">
+                <button class="btn" @onclick="SaveRetention">Save Retention</button>
+            </div>
+        </section>
+    }
+    else if (_activeTab == "worker")
+    {
+        <section class="form-section">
+            <h2>Worker Health (VBAWS)</h2>
+            <div class="form-row">
+                <label><input type="checkbox" @bind="_workerEnabled" /> Enabled</label>
+            </div>
+            <div class="form-row">
+                <label>Session lookback (hours)</label>
+                <input type="number" min="1" max="720" @bind="_workerLookback" />
+            </div>
+            <div class="form-row">
+                <label>Session failure rate — warning threshold</label>
+                <input type="number" min="0" max="1" step="0.05" @bind="_failureWarn" />
+                <span class="muted">e.g. 0.1 = warn if &gt;10% sessions failed</span>
+            </div>
+            <div class="form-row">
+                <label>Session failure rate — critical threshold</label>
+                <input type="number" min="0" max="1" step="0.05" @bind="_failureCrit" />
+                <span class="muted">e.g. 0.3 = critical if &gt;30% sessions failed</span>
+            </div>
+            <div class="form-row">
+                <label>Retention session — max failures before warn</label>
+                <input type="number" min="0" @bind="_retentionMaxFailures" />
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" @bind="_zeroDeletedWarn" /> Warn if retention session deletes 0 items</label>
+            </div>
+            <div class="form-row">
+                <label>Recurring failure threshold</label>
+                <input type="number" min="1" @bind="_recurringThreshold" />
+            </div>
+            <div class="form-actions">
+                <button class="btn" @onclick="SaveWorker">Save Worker Health</button>
+            </div>
+        </section>
+    }
+}
+
+@if (!string.IsNullOrEmpty(_flash))
+{
+    <div class="flash">@_flash</div>
+}
+
+@code {
+    private ConfigSnapshot? _cfg;
+    private string _activeTab = "repo";
+    private string? _flash;
+
+    // Repo Health
+    private bool _repoEnabled;
+    private int _freeWarnPct = 15;
+    private int _freeCritPct = 5;
+    private bool _includeExternalRepos = true;
+    private bool _checkExternalMaintenance = true;
+    private int _repoLookback = 24;
+    private int _repoOverlap = 2;
+
+    // Retention
+    private bool _retentionEnabled;
+    private double _overageMultiplier = 1.5;
+    private double _maxAgeMultiplier = 1.5;
+    private bool _orphanDetection = true;
+    private int _retentionLookback = 24;
+    private string _excludeBackups = "";
+
+    // Worker Health
+    private bool _workerEnabled;
+    private int _workerLookback = 24;
+    private double _failureWarn = 0.1;
+    private double _failureCrit = 0.3;
+    private int _retentionMaxFailures = 1;
+    private bool _zeroDeletedWarn = true;
+    private int _recurringThreshold = 3;
+
+    protected override void OnInitialized()
+    {
+        _cfg = Config.Load();
+        LoadValues();
+    }
+
+    private void LoadValues()
+    {
+        if (_cfg is null) return;
+
+        // Repo Health
+        _repoEnabled = ToBool(_cfg.RepoHealth.GetValueOrDefault("enabled"), true);
+        var repoThresh = _cfg.RepoHealth.GetValueOrDefault("thresholds") as Dictionary<string, object> ?? new();
+        _freeWarnPct = ToInt(repoThresh.GetValueOrDefault("free_space_warning_pct"), 15);
+        _freeCritPct = ToInt(repoThresh.GetValueOrDefault("free_space_critical_pct"), 5);
+        _includeExternalRepos = ToBool(_cfg.RepoHealth.GetValueOrDefault("include_external_repos"), true);
+        _checkExternalMaintenance = ToBool(_cfg.RepoHealth.GetValueOrDefault("check_external_maintenance"), true);
+        _repoLookback = ToInt(_cfg.RepoHealth.GetValueOrDefault("session_lookback_hours"), 24);
+        _repoOverlap = ToInt(_cfg.RepoHealth.GetValueOrDefault("lookback_overlap_minutes"), 2);
+
+        // Retention
+        _retentionEnabled = ToBool(_cfg.Retention.GetValueOrDefault("enabled"), true);
+        var retThresh = _cfg.Retention.GetValueOrDefault("thresholds") as Dictionary<string, object> ?? new();
+        _overageMultiplier = ToDouble(retThresh.GetValueOrDefault("overage_multiplier"), 1.5);
+        _maxAgeMultiplier = ToDouble(retThresh.GetValueOrDefault("max_age_multiplier"), 1.5);
+        _orphanDetection = ToBool(retThresh.GetValueOrDefault("orphan_detection"), true);
+        _retentionLookback = ToInt(_cfg.Retention.GetValueOrDefault("session_lookback_hours"), 24);
+        _excludeBackups = string.Join(", ", AsStringList(_cfg.Retention.GetValueOrDefault("exclude_backups")));
+
+        // Worker Health
+        _workerEnabled = ToBool(_cfg.WorkerHealth.GetValueOrDefault("enabled"), true);
+        _workerLookback = ToInt(_cfg.WorkerHealth.GetValueOrDefault("lookback_hours"), 24);
+        var workThresh = _cfg.WorkerHealth.GetValueOrDefault("thresholds") as Dictionary<string, object> ?? new();
+        _failureWarn = ToDouble(workThresh.GetValueOrDefault("session_failure_rate_warning"), 0.1);
+        _failureCrit = ToDouble(workThresh.GetValueOrDefault("session_failure_rate_critical"), 0.3);
+        _retentionMaxFailures = ToInt(workThresh.GetValueOrDefault("retention_session_max_failures"), 1);
+        _zeroDeletedWarn = ToBool(workThresh.GetValueOrDefault("zero_deleted_items_warning"), true);
+        _recurringThreshold = ToInt(workThresh.GetValueOrDefault("recurring_failure_threshold"), 3);
+    }
+
+    private void SaveRepo()
+    {
+        var section = new Dictionary<string, object>
+        {
+            ["enabled"] = _repoEnabled,
+            ["thresholds"] = new Dictionary<string, object>
+            {
+                ["free_space_warning_pct"] = _freeWarnPct,
+                ["free_space_critical_pct"] = _freeCritPct,
+            },
+            ["include_external_repos"] = _includeExternalRepos,
+            ["check_external_maintenance"] = _checkExternalMaintenance,
+            ["session_lookback_hours"] = _repoLookback,
+            ["lookback_overlap_minutes"] = _repoOverlap,
+        };
+        Config.SaveMonitorSection("repo_health", section);
+        _flash = "Repo Health thresholds saved";
+        _cfg = Config.Load();
+    }
+
+    private void SaveRetention()
+    {
+        var section = new Dictionary<string, object>
+        {
+            ["enabled"] = _retentionEnabled,
+            ["thresholds"] = new Dictionary<string, object>
+            {
+                ["overage_multiplier"] = _overageMultiplier,
+                ["max_age_multiplier"] = _maxAgeMultiplier,
+                ["orphan_detection"] = _orphanDetection,
+            },
+            ["session_lookback_hours"] = _retentionLookback,
+        };
+        var excludes = _excludeBackups
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Cast<object>()
+            .ToList();
+        if (excludes.Count > 0) section["exclude_backups"] = excludes;
+
+        Config.SaveMonitorSection("retention", section);
+        _flash = "Retention thresholds saved";
+        _cfg = Config.Load();
+    }
+
+    private void SaveWorker()
+    {
+        var section = new Dictionary<string, object>
+        {
+            ["enabled"] = _workerEnabled,
+            ["lookback_hours"] = _workerLookback,
+            ["thresholds"] = new Dictionary<string, object>
+            {
+                ["session_failure_rate_warning"] = _failureWarn,
+                ["session_failure_rate_critical"] = _failureCrit,
+                ["retention_session_max_failures"] = _retentionMaxFailures,
+                ["zero_deleted_items_warning"] = _zeroDeletedWarn,
+                ["recurring_failure_threshold"] = _recurringThreshold,
+            },
+        };
+        Config.SaveMonitorSection("worker_health", section);
+        _flash = "Worker Health thresholds saved";
+        _cfg = Config.Load();
+    }
+
+    private static int ToInt(object? v, int dflt) => v switch
+    {
+        int i => i,
+        double d => (int)d,
+        string s when int.TryParse(s, out var i) => i,
+        _ => dflt,
+    };
+
+    private static double ToDouble(object? v, double dflt) => v switch
+    {
+        double d => d,
+        int i => i,
+        string s when double.TryParse(s, out var d) => d,
+        _ => dflt,
+    };
+
+    private static bool ToBool(object? v, bool dflt) => v switch
+    {
+        bool b => b,
+        string s => s.Equals("true", StringComparison.OrdinalIgnoreCase),
+        _ => dflt,
+    };
+
+    private static IEnumerable<string> AsStringList(object? v) => v switch
+    {
+        IEnumerable<object> list => list.Select(x => x?.ToString() ?? ""),
+        _ => Array.Empty<string>(),
+    };
+}

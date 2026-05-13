@@ -3,6 +3,8 @@ using System.Text.Json;
 using Serilog;
 using Spectre.Console;
 using VeeamVhcAws.Core.Config;
+using VeeamVhcAws.Core.Models;
+using VeeamVhcAws.Ui;
 
 namespace VeeamVhcAws.Commands;
 
@@ -83,19 +85,13 @@ public static class CapturesCommand
                 if (resource.Length > 40) resource = resource[..40];
                 if (text.Length > 60) text = text[..60];
 
-                var sevStyle = severity switch
-                {
-                    "critical" => "red",
-                    "error" => "red bold",
-                    "warning" => "yellow",
-                    _ => "white",
-                };
-
+                var sev = SeverityExtensions.ParseSeverity(severity);
+                var sevMarkup = $"{Theme.SevStyle(sev)}{Markup.Escape(severity)}[/]";
                 var countStr = count is double d ? ((int)d).ToString() : count?.ToString() ?? "0";
 
                 table.AddRow(
                     keyShort,
-                    $"[{sevStyle}]{Markup.Escape(severity)}[/]",
+                    sevMarkup,
                     Markup.Escape(resource),
                     Markup.Escape(text),
                     countStr,

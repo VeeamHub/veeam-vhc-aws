@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Reflection;
 using Spectre.Console;
+using VeeamVhcAws.Ui;
 
 namespace VeeamVhcAws.Commands;
 
@@ -10,12 +11,22 @@ public static class SetupCommand
     {
         var command = new Command("setup", "Interactive first-time setup — creates a config file");
         var outputOption = new Option<string?>(new[] { "--output", "-o" }, "Config file output path");
+        var templateOption = new Option<bool>("--template", "Copy the bundled example config instead of running the wizard");
         command.AddOption(outputOption);
+        command.AddOption(templateOption);
 
-        command.SetHandler((string? configPath) =>
+        command.SetHandler((string? configPath, bool useTemplate) =>
         {
             configPath ??= "./veeam-vhc-aws.yaml";
 
+            // If --template flag is set, or terminal is non-interactive, use the old template copy behavior
+            if (useTemplate || !TerminalCapabilities.IsInteractive)
+            {
+                RunTemplateCopy(configPath);
+                return;
+            }
+
+            // Interactive wizard
             if (File.Exists(configPath))
             {
                 if (!AnsiConsole.Confirm($"Config file {configPath} already exists. Overwrite?", false))
@@ -25,65 +36,82 @@ public static class SetupCommand
                 }
             }
 
-            // Try embedded resource first
-            var assembly = Assembly.GetExecutingAssembly();
-            var resourceStream = assembly.GetManifestResourceStream("VeeamVhcAws.config.example.yaml");
-
-            if (resourceStream != null)
-            {
-                using var reader = new StreamReader(resourceStream);
-                var content = reader.ReadToEnd();
-                File.WriteAllText(configPath, content);
-            }
-            else
-            {
-                // Try filesystem locations
-                var baseDirs = new List<string>
-                {
-                    Path.GetDirectoryName(assembly.Location) ?? "",
-                    AppDomain.CurrentDomain.BaseDirectory,
-                };
-
-                string? examplePath = null;
-                foreach (var baseDir in baseDirs)
-                {
-                    var candidates = new[]
-                    {
-                        Path.Combine(baseDir, "config", "example.yaml"),
-                        Path.Combine(baseDir, "example.yaml"),
-                    };
-                    foreach (var candidate in candidates)
-                    {
-                        if (File.Exists(candidate))
-                        {
-                            examplePath = candidate;
-                            break;
-                        }
-                    }
-                    if (examplePath != null) break;
-                }
-
-                if (examplePath != null)
-                {
-                    File.Copy(examplePath, configPath, overwrite: true);
-                }
-                else
-                {
-                    // Generate minimal config inline
-                    File.WriteAllText(configPath, MinimalConfig);
-                }
-            }
-
-            var fullPath = Path.GetFullPath(configPath);
-            AnsiConsole.MarkupLine($"\n[green]Config file created:[/] {fullPath}");
-            AnsiConsole.MarkupLine("\n[bold]Next steps:[/]");
-            AnsiConsole.MarkupLine($"  1. Edit [cyan]{configPath}[/] with your server details");
-            AnsiConsole.MarkupLine($"  2. Test connectivity:  [cyan]veeam-vhc-aws test-connection -c {configPath}[/]");
-            AnsiConsole.MarkupLine($"  3. Run all monitors:   [cyan]veeam-vhc-aws all -c {configPath}[/]");
-            AnsiConsole.WriteLine();
-        }, outputOption);
+            SetupWizard.Run(configPath);
+        }, outputOption, templateOption);
 
         return command;
+    }
+
+    internal static void RunTemplateCopy(string configPath)
+    {
+        if (File.Exists(configPath))
+        {
+            Console.Error.WriteLine($"Config file {configPath} already exists. Use --output to specify a different path.");
+            return;
+        }
+
+        // Try embedded resource first
+        var assembly = Assembly.GetExecutingAssembly();
+        var resourceStream = assembly.GetManifestResourceStream("VeeamVhcAws.config.example.yaml");
+
+        if (resourceStream != null)
+        {
+            using var reader = new StreamReader(resourceStream);
+            var content = reader.ReadToEnd();
+            File.WriteAllText(configPath, content);
+        }
+        else
+        {
+            // Try filesystem locations
+            var baseDirs = new List<string>
+            {
+                Path.GetDirectoryName(assembly.Location) ?? "",
+                AppDomain.CurrentDomain.BaseDirectory,
+            };
+
+            string? examplePath = null;
+            foreach (var baseDir in baseDirs)
+            {
+                var candidates = new[]
+                {
+                    Path.Combine(baseDir, "config", "example.yaml"),
+                    Path.Combine(baseDir, "example.yaml"),
+                };
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        examplePath = candidate;
+                        break;
+                    }
+                }
+                if (examplePath != null) break;
+            }
+
+            if (examplePath != null)
+                File.Copy(examplePath, configPath, overwrite: true);
+            else
+                File.WriteAllText(configPath, MinimalConfig);
+        }
+
+        var fullPath = Path.GetFullPath(configPath);
+        if (TerminalCapabilities.IsInteractive)
+        {
+            AnsiConsole.MarkupLine($"\n[green]Config file created:[/] {fullPath.EscapeMarkup()}");
+            AnsiConsole.MarkupLine("\n[bold]Next steps:[/]");
+            AnsiConsole.MarkupLine($"  1. Edit [cyan]{configPath.EscapeMarkup()}[/] with your server details");
+            AnsiConsole.MarkupLine($"  2. Test connectivity:  [cyan]veeam-vhc-aws test-connection -c {configPath.EscapeMarkup()}[/]");
+            AnsiConsole.MarkupLine($"  3. Run all monitors:   [cyan]veeam-vhc-aws all -c {configPath.EscapeMarkup()}[/]");
+            AnsiConsole.WriteLine();
+        }
+        else
+        {
+            Console.WriteLine($"Config file created: {fullPath}");
+            Console.WriteLine("Next steps:");
+            Console.WriteLine($"  1. Edit {configPath} with your server details");
+            Console.WriteLine($"  2. Test connectivity:  veeam-vhc-aws test-connection -c {configPath}");
+            Console.WriteLine($"  3. Run all monitors:   veeam-vhc-aws all -c {configPath}");
+        }
     }
 
     private const string MinimalConfig = @"# veeam-vhc-aws.yaml — Edit this file with your server details

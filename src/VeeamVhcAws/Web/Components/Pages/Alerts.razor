@@ -1,0 +1,155 @@
+@page "/alerts"
+@rendermode InteractiveServer
+@inject StateService State
+@implements IDisposable
+
+<PageTitle>Alerts — Veeam VHC AWS</PageTitle>
+
+<h1>Alerts</h1>
+
+<div class="toolbar">
+    <label>Severity:
+        <select @bind="_severityFilter">
+            <option value="">All</option>
+            <option value="error">Error</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+            <option value="ok">OK</option>
+        </select>
+    </label>
+    <label>Server:
+        <select @bind="_serverFilter">
+            <option value="">All</option>
+            @foreach (var server in _servers)
+            {
+                <option value="@server">@server</option>
+            }
+        </select>
+    </label>
+    <label>Search:
+        <input type="text" @bind="_searchFilter" @bind:event="oninput" placeholder="resource or message" />
+    </label>
+    <button class="btn" @onclick="Refresh">Refresh</button>
+</div>
+
+@if (_filtered.Count == 0)
+{
+    <p class="empty">No alerts match the current filters.</p>
+}
+else
+{
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Severity</th>
+                <th>Server</th>
+                <th>Monitor</th>
+                <th>Resource</th>
+                <th>Message</th>
+                <th>Count</th>
+                <th>Last seen</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var a in _filtered)
+            {
+                <tr class="row-@a.Severity @(a.Suppressed ? "suppressed" : "")">
+                    <td><SeverityBadge Severity="@a.Severity" /></td>
+                    <td>@a.Server</td>
+                    <td>@a.Monitor</td>
+                    <td>@a.Resource</td>
+                    <td class="msg">@a.Message</td>
+                    <td>@a.Count.ToString("0")</td>
+                    <td>@(a.LastSeen?.ToLocalTime().ToString("MM-dd HH:mm") ?? "—")</td>
+                    <td>
+                        @if (a.Suppressed)
+                        {
+                            <button class="btn btn-small" @onclick="() => Unsuppress(a.Key)">Unsuppress</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-small btn-warn" @onclick="() => Suppress(a.Key)">Suppress</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (!string.IsNullOrEmpty(_flash))
+{
+    <div class="flash">@_flash</div>
+}
+
+@code {
+    private StateSnapshot? _snapshot;
+    private List<AlertView> _filtered = new();
+    private List<string> _servers = new();
+    private string _severityFilter = "";
+    private string _serverFilter = "";
+    private string _searchFilter = "";
+    private string? _flash;
+    private Timer? _autoRefresh;
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        _autoRefresh = new System.Threading.Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    public void Dispose() => _autoRefresh?.Dispose();
+
+    private void Refresh()
+    {
+        _snapshot = State.Load();
+        _servers = _snapshot.ActiveFindings
+            .Concat(_snapshot.CapturedErrors)
+            .Select(a => a.Server)
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+        ApplyFilters();
+    }
+
+    private void ApplyFilters()
+    {
+        if (_snapshot is null) return;
+        IEnumerable<AlertView> q = _snapshot.ActiveFindings;
+        if (!string.IsNullOrEmpty(_severityFilter))
+            q = q.Where(a => a.Severity == _severityFilter);
+        if (!string.IsNullOrEmpty(_serverFilter))
+            q = q.Where(a => a.Server == _serverFilter);
+        if (!string.IsNullOrEmpty(_searchFilter))
+        {
+            var s = _searchFilter.ToLowerInvariant();
+            q = q.Where(a => a.Resource.Contains(s, StringComparison.OrdinalIgnoreCase)
+                          || a.Message.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        _filtered = q.ToList();
+    }
+
+    protected override void OnParametersSet() => ApplyFilters();
+
+    private void Suppress(string key)
+    {
+        if (State.Suppress(key))
+        {
+            _flash = $"Suppressed {key[..8]}…";
+            Refresh();
+        }
+        else _flash = $"Could not suppress {key[..8]} (not found in captured_errors)";
+    }
+
+    private void Unsuppress(string key)
+    {
+        if (State.Unsuppress(key))
+        {
+            _flash = $"Unsuppressed {key[..8]}…";
+            Refresh();
+        }
+        else _flash = $"Could not unsuppress {key[..8]}";
+    }
+}

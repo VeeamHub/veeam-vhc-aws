@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -50,6 +50,11 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>VeeamVhcAws.Tests</_Parameter1>
     </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Web SDK implicit-usings collide with Serilog.ILogger; suppress and import explicitly when needed -->
+    <Using Remove="Microsoft.Extensions.Logging" />
   </ItemGroup>
 
   <ItemGroup>

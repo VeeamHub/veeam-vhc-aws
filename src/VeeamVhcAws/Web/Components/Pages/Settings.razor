@@ -1,0 +1,189 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject ConfigService Config
+@inject StateService State
+
+<PageTitle>Settings — Veeam VHC AWS</PageTitle>
+
+<h1>Global Settings</h1>
+
+@if (_cfg is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <section class="form-section">
+        <h2>Files <span class="muted">(read-only)</span></h2>
+        <table class="data-table">
+            <tbody>
+                <tr><td><strong>Config file</strong></td><td><code>@_cfg.ConfigPath</code></td></tr>
+                <tr><td><strong>State file</strong></td><td><code>@State.StateFilePath</code></td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="form-section">
+        <h2>Logging</h2>
+        <div class="form-row">
+            <label>Log level</label>
+            <select @bind="_logLevel">
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO">INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label>Log file path</label>
+            <input type="text" @bind="_logFile" />
+        </div>
+        <div class="form-row">
+            <label>Rotation: keep N daily files</label>
+            <input type="number" min="1" max="365" @bind="_rotationKeep" />
+        </div>
+        <div class="form-row">
+            <label><input type="checkbox" @bind="_logConsole" /> Also log to console (stderr)</label>
+        </div>
+        <div class="form-row">
+            <label>Disk free space warning threshold (%)</label>
+            <input type="number" min="0" max="100" @bind="_diskWarnPct" />
+        </div>
+    </section>
+
+    <section class="form-section">
+        <h2>HTTP / API Tuning</h2>
+        <div class="form-row">
+            <label>Request timeout (seconds)</label>
+            <input type="number" min="5" max="300" @bind="_timeoutSeconds" />
+        </div>
+        <div class="form-row">
+            <label>Retry count</label>
+            <input type="number" min="0" max="10" @bind="_retryCount" />
+        </div>
+        <div class="form-row">
+            <label>Retry delay (seconds)</label>
+            <input type="number" min="1" max="60" @bind="_retryDelay" />
+        </div>
+        <div class="form-row">
+            <label>API page size</label>
+            <input type="number" min="10" max="5000" @bind="_pageSize" />
+        </div>
+        <div class="form-row">
+            <label>Max pages (circuit breaker)</label>
+            <input type="number" min="1" max="10000" @bind="_maxPages" />
+        </div>
+    </section>
+
+    <section class="form-section">
+        <h2>Daily Summary</h2>
+        <div class="form-row">
+            <label><input type="checkbox" @bind="_dailySummaryEnabled" /> Enable daily summary email/notification</label>
+        </div>
+        <p class="muted">Time is controlled by the scheduled task, not this config.</p>
+    </section>
+
+    <div class="form-actions">
+        <button class="btn" @onclick="SaveAll">Save Settings</button>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_flash))
+{
+    <div class="flash">@_flash</div>
+}
+
+@code {
+    private ConfigSnapshot? _cfg;
+    private string? _flash;
+
+    // Logging
+    private string _logLevel = "DEBUG";
+    private string _logFile = "./veeam-vhc-aws.log";
+    private int _rotationKeep = 30;
+    private bool _logConsole = true;
+    private int _diskWarnPct = 20;
+
+    // HTTP
+    private int _timeoutSeconds = 30;
+    private int _retryCount = 2;
+    private int _retryDelay = 5;
+    private int _pageSize = 500;
+    private int _maxPages = 100;
+
+    // Daily summary
+    private bool _dailySummaryEnabled;
+
+    protected override void OnInitialized()
+    {
+        _cfg = Config.Load();
+        Load();
+    }
+
+    private void Load()
+    {
+        if (_cfg is null) return;
+
+        var logging = _cfg.Global.GetValueOrDefault("logging") as Dictionary<string, object> ?? new();
+        _logLevel = logging.GetValueOrDefault("level")?.ToString() ?? "DEBUG";
+        _logFile = logging.GetValueOrDefault("file")?.ToString() ?? "./veeam-vhc-aws.log";
+        _rotationKeep = ToInt(logging.GetValueOrDefault("rotation_keep"), 30);
+        _logConsole = ToBool(logging.GetValueOrDefault("console"), true);
+        _diskWarnPct = ToInt(logging.GetValueOrDefault("disk_warning_pct"), 20);
+
+        _timeoutSeconds = ToInt(_cfg.Global.GetValueOrDefault("timeout_seconds"), 30);
+        _retryCount = ToInt(_cfg.Global.GetValueOrDefault("retry_count"), 2);
+        _retryDelay = ToInt(_cfg.Global.GetValueOrDefault("retry_delay_seconds"), 5);
+        _pageSize = ToInt(_cfg.Global.GetValueOrDefault("page_size"), 500);
+        _maxPages = ToInt(_cfg.Global.GetValueOrDefault("max_pages"), 100);
+
+        _dailySummaryEnabled = ToBool(_cfg.DailySummary.GetValueOrDefault("enabled"), false);
+    }
+
+    private void SaveAll()
+    {
+        if (_cfg is null) return;
+
+        var global = new Dictionary<string, object>(_cfg.Global)
+        {
+            ["timeout_seconds"] = _timeoutSeconds,
+            ["retry_count"] = _retryCount,
+            ["retry_delay_seconds"] = _retryDelay,
+            ["page_size"] = _pageSize,
+            ["max_pages"] = _maxPages,
+            ["logging"] = new Dictionary<string, object>
+            {
+                ["level"] = _logLevel,
+                ["file"] = _logFile,
+                ["rotation_keep"] = _rotationKeep,
+                ["console"] = _logConsole,
+                ["disk_warning_pct"] = _diskWarnPct,
+            },
+        };
+        Config.SaveMonitorSection("global", global);
+
+        var dailySummary = new Dictionary<string, object>(_cfg.DailySummary)
+        {
+            ["enabled"] = _dailySummaryEnabled,
+        };
+        Config.SaveMonitorSection("daily_summary", dailySummary);
+
+        _flash = "Settings saved";
+        _cfg = Config.Load();
+    }
+
+    private static int ToInt(object? v, int dflt) => v switch
+    {
+        int i => i,
+        double d => (int)d,
+        string s when int.TryParse(s, out var i) => i,
+        _ => dflt,
+    };
+
+    private static bool ToBool(object? v, bool dflt) => v switch
+    {
+        bool b => b,
+        string s => s.Equals("true", StringComparison.OrdinalIgnoreCase),
+        _ => dflt,
+    };
+}

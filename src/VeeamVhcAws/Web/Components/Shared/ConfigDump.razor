@@ -1,0 +1,34 @@
+@code {
+    [Parameter, EditorRequired] public Dictionary<string, object> Section { get; set; } = new();
+}
+
+@if (Section.Count == 0)
+{
+    <p class="muted">(empty — using defaults)</p>
+}
+else
+{
+    <table class="data-table">
+        <thead><tr><th>Key</th><th>Value</th></tr></thead>
+        <tbody>
+            @foreach (var (key, value) in Section)
+            {
+                <tr>
+                    <td><code>@key</code></td>
+                    <td>@Render(value)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private static string Render(object? value) => value switch
+    {
+        null => "—",
+        bool b => b ? "true" : "false",
+        Dictionary<string, object> d => string.Join(", ", d.Select(kv => $"{kv.Key}={kv.Value}")),
+        IEnumerable<object> list => string.Join(", ", list.Select(x => x?.ToString() ?? "")),
+        _ => value.ToString() ?? "",
+    };
+}

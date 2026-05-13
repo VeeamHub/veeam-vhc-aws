@@ -4,6 +4,7 @@ using Spectre.Console;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
+using VeeamVhcAws.Ui;
 
 namespace VeeamVhcAws.Commands;
 
@@ -45,21 +46,13 @@ public static class DiagnoseCommand
 
                 foreach (var pattern in pe.Patterns)
                 {
-                    var sevStyle = pattern.Severity switch
-                    {
-                        Severity.Ok => "green",
-                        Severity.Warning => "yellow",
-                        Severity.Critical => "red",
-                        Severity.Error => "red bold",
-                        _ => "white",
-                    };
-
                     var patternStr = pattern.Pattern.Length > 60 ? pattern.Pattern[..60] : pattern.Pattern;
                     var messageStr = pattern.Message.Length > 80 ? pattern.Message[..80] : pattern.Message;
+                    var sevMarkup = $"{Theme.SevStyle(pattern.Severity)}{pattern.Severity.ToLowerString()}[/]";
 
                     table.AddRow(
                         pattern.Category,
-                        $"[{sevStyle}]{pattern.Severity.ToLowerString()}[/]",
+                        sevMarkup,
                         Markup.Escape(patternStr),
                         Markup.Escape(messageStr),
                         pattern.Source);

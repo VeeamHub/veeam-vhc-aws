@@ -1,0 +1,111 @@
+@page "/captures"
+@rendermode InteractiveServer
+@inject StateService State
+
+<PageTitle>Captures — Veeam VHC AWS</PageTitle>
+
+<h1>Captured Errors</h1>
+<p class="muted">All errors the monitors have observed, with suppression history.</p>
+
+<div class="toolbar">
+    <label>Show:
+        <select @bind="_filter">
+            <option value="all">All</option>
+            <option value="unsuppressed">Unsuppressed only</option>
+            <option value="suppressed">Suppressed only</option>
+        </select>
+    </label>
+    <button class="btn" @onclick="Refresh">Refresh</button>
+</div>
+
+@if (_filtered.Count == 0)
+{
+    <p class="empty">No captured errors match the current filter.</p>
+}
+else
+{
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Key</th>
+                <th>Severity</th>
+                <th>Server</th>
+                <th>Monitor</th>
+                <th>Resource</th>
+                <th>Message</th>
+                <th>Count</th>
+                <th>Last seen</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var a in _filtered)
+            {
+                <tr class="row-@a.Severity @(a.Suppressed ? "suppressed" : "")">
+                    <td class="key">@a.Key[..8]</td>
+                    <td><SeverityBadge Severity="@a.Severity" /></td>
+                    <td>@a.Server</td>
+                    <td>@a.Monitor</td>
+                    <td>@a.Resource</td>
+                    <td class="msg">@a.Message</td>
+                    <td>@a.Count.ToString("0")</td>
+                    <td>@(a.LastSeen?.ToLocalTime().ToString("MM-dd HH:mm") ?? "—")</td>
+                    <td>
+                        @if (a.Suppressed)
+                        {
+                            <button class="btn btn-small" @onclick="() => Unsuppress(a.Key)">Unsuppress</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-small btn-warn" @onclick="() => Suppress(a.Key)">Suppress</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (!string.IsNullOrEmpty(_flash))
+{
+    <div class="flash">@_flash</div>
+}
+
+@code {
+    private StateSnapshot? _snapshot;
+    private List<AlertView> _filtered = new();
+    private string _filter = "all";
+    private string? _flash;
+
+    protected override void OnInitialized() => Refresh();
+    protected override void OnParametersSet() => ApplyFilter();
+
+    private void Refresh()
+    {
+        _snapshot = State.Load();
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        if (_snapshot is null) return;
+        _filtered = _filter switch
+        {
+            "unsuppressed" => _snapshot.CapturedErrors.Where(a => !a.Suppressed).ToList(),
+            "suppressed"   => _snapshot.CapturedErrors.Where(a => a.Suppressed).ToList(),
+            _              => _snapshot.CapturedErrors.ToList(),
+        };
+    }
+
+    private void Suppress(string key)
+    {
+        if (State.Suppress(key)) { _flash = $"Suppressed {key[..8]}…"; Refresh(); }
+        else _flash = $"Could not suppress {key[..8]}";
+    }
+
+    private void Unsuppress(string key)
+    {
+        if (State.Unsuppress(key)) { _flash = $"Unsuppressed {key[..8]}…"; Refresh(); }
+        else _flash = $"Could not unsuppress {key[..8]}";
+    }
+}

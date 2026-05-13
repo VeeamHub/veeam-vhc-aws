@@ -1,0 +1,31 @@
+@inherits LayoutComponentBase
+
+<div class="app-shell">
+    <header class="app-header">
+        <div class="brand">
+            <strong>Veeam VHC AWS</strong>
+            <span class="brand-sub">Admin</span>
+        </div>
+        <nav class="top-nav">
+            <NavLink href="" Match="NavLinkMatch.All">Dashboard</NavLink>
+            <NavLink href="alerts">Alerts</NavLink>
+            <NavLink href="servers">Servers</NavLink>
+            <NavLink href="outputs">Outputs</NavLink>
+            <NavLink href="thresholds">Thresholds</NavLink>
+            <NavLink href="captures">Captures</NavLink>
+            <NavLink href="settings">Settings</NavLink>
+        </nav>
+    </header>
+    <main class="app-main">
+        @Body
+    </main>
+    <footer class="app-footer">
+        <span>veeam-vhc-aws admin UI</span>
+    </footer>
+</div>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
+</div>

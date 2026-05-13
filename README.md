@@ -28,16 +28,38 @@
 
 > This is a community-supported tool and is not an officially supported Veeam product.
 
+## ⚡ Quickstart (60 seconds)
+
+```powershell
+# 1. Download the latest release zip, extract it, then in PowerShell as Admin:
+.\setup.ps1
+
+# 2. Launch the web admin GUI to add servers and view alerts:
+veeam-vhc-aws ui
+
+#    Your browser opens to http://127.0.0.1:9101
+#    -> click "+ Add Server" to onboard your first VBR or VBAWS server
+#    -> the Dashboard shows live status; the Alerts page lets you suppress with one click
+
+# 3. The scheduled task runs every 5 minutes in the background.
+#    Open the UI any time at:  veeam-vhc-aws ui
+```
+
+**Already installed?** Just run `veeam-vhc-aws ui` and open <http://127.0.0.1:9101>.
+
+**Prefer YAML?** Run `veeam-vhc-aws setup` for the interactive terminal wizard, or edit `C:\Program Files\VHC\veeam-vhc-aws.yaml` directly.
+
 ## Features
 
 - **Multi-Server** -- Monitor multiple VBR and VBAWS servers from a single config with dynamic parallelism
 - **Repository Health** -- Monitors repo capacity (including SOBR extents), detects unreachable repos, checks all repo-related sessions for credential/S3/connectivity failures
 - **Retention Compliance** -- Validates restore point counts and ages against policy, detects orphaned backups (with Kasten/external policy awareness and configurable exclusions)
 - **Worker Health** -- Analyzes VBAWS session failure rates, detects subnet exhaustion, credential failures, and silent retention failures
-- **Infrastructure Health** -- Query managed servers (vCenter, ESXi, Windows/Linux hosts) for availability status, browse vCenter inventory (VMs, clusters, datastores), and check TLS certificate expiry via the VBR REST API
 - **Cross-Correlation** -- Links findings across monitors per-server to surface root causes (e.g., credential expiry causing retention failures)
 - **Adaptive Lookback** -- After each successful run, the session lookback window narrows to just since the last success + overlap buffer, dramatically reducing API calls on busy VBR servers. Falls back to full window on failure or first run.
 - **Flexible Output** -- JSON, webhooks (Slack/Teams/PagerDuty/ntfy), Prometheus metrics, email
+- **Web Admin GUI** -- `veeam-vhc-aws ui` launches a browser-based admin dashboard. View live alerts, suppress with one click, add/edit/delete servers, configure output handlers, and tune thresholds — all without touching YAML
+- **Interactive Terminal UX** -- Setup wizard, live monitor progress, severity-coded results table, and actionable connection diagnostics — all auto-disabled for scheduled tasks and scripting
 - **Logging** -- Verbose logging with time-based rotation, disk space alerts, and credential redaction
 
 ## 📗 Documentation
@@ -83,10 +105,16 @@ docker run -v /path/to/config.yaml:/config/config.yaml veeam-vhc-aws
 ### Usage
 
 ```bash
-# Interactive setup — creates config file
+# Launch the web admin GUI (browser-based)
+veeam-vhc-aws ui
+
+# Interactive terminal setup wizard — guides you through server config, notifications, and thresholds
 veeam-vhc-aws setup
 
-# Run all monitors on all servers
+# Copy the bundled example config (non-interactive / automation)
+veeam-vhc-aws setup --template -o config.yaml
+
+# Run all monitors on all servers (live progress + results table in interactive terminals)
 veeam-vhc-aws all -c veeam-vhc-aws.yaml
 
 # Run individual monitors
@@ -97,7 +125,7 @@ veeam-vhc-aws worker-health -c config.yaml
 # Prometheus HTTP server (long-running mode)
 veeam-vhc-aws serve -c config.yaml --port 9100 --interval 300
 
-# Test connectivity to all configured servers
+# Test connectivity to all configured servers (live spinners + actionable error hints)
 veeam-vhc-aws test-connection -c config.yaml
 
 # Inspect error patterns or match an error string
@@ -114,7 +142,86 @@ veeam-vhc-aws encrypt-config -c config.yaml
 
 # Print version
 veeam-vhc-aws version
+
+# Suppress all interactive output (for use in scripts or CI)
+veeam-vhc-aws all -c config.yaml --no-interactive
 ```
+
+### Web Admin GUI
+
+<p align="center">
+  <img src="docs/images/web-admin-ui.png" alt="Veeam VHC AWS web admin UI — Dashboard and Alerts pages" width="800">
+</p>
+
+<!--
+  To replace the screenshot:
+  1. Take a PNG capture of the Dashboard (1200-1600px wide is ideal).
+  2. Optionally include a second composited shot of the Alerts page.
+  3. Save as docs/images/web-admin-ui.png in this repo.
+-->
+
+The `ui` command launches a browser-based admin dashboard — embedded ASP.NET Core + Blazor Server hosted by the same `veeam-vhc-aws.exe`. No separate install or web server required.
+
+```bash
+# Localhost-only (default) — admin uses browser on the same machine as the tool
+veeam-vhc-aws ui -c config.yaml
+
+# Listen on all interfaces with token auth (for remote admin from your workstation)
+veeam-vhc-aws ui -c config.yaml --bind 0.0.0.0 --port 9101
+
+# Regenerate the auth token
+veeam-vhc-aws ui --regen-token
+
+# Don't auto-open the browser (useful for headless servers)
+veeam-vhc-aws ui -c config.yaml --no-browser
+```
+
+**Pages:**
+
+| Page | What you can do |
+|---|---|
+| **Dashboard** | At-a-glance status banner, per-server health cards, last-run time, finding counts |
+| **Alerts** | Live table of active findings with severity badges. **Click [Suppress] to silence an alert.** Filter by severity/server, search by resource. Auto-refreshes every 5s. |
+| **Servers** | Add/edit/delete VBR and VBAWS servers via forms. Passwords are obfuscated on save via the same `PasswordObfuscator` the CLI uses. |
+| **Outputs** | Add/edit/delete notification channels — webhook (Slack/Teams/ntfy/PagerDuty), email (SMTP), Prometheus, JSON file. Per-type form fields. |
+| **Thresholds** | Tabbed editor for per-monitor thresholds (Repo Health / Retention / Worker Health). |
+| **Captures** | Historical error log with filter (suppressed/unsuppressed). Same suppress/unsuppress controls as Alerts. |
+| **Settings** | Global config: logging level, HTTP timeouts, retry counts, page sizes, daily summary toggle. |
+
+**Authentication:**
+
+- **Localhost (default)** — `--bind 127.0.0.1`. No auth — accessible only from the same machine. RDP in, open browser, manage.
+- **Remote** — `--bind 0.0.0.0` or specific IP. A 64-char token is auto-generated on first run and stored at `C:\ProgramData\VHC\ui-token.txt` (Windows) or `~/.vhc/ui-token.txt` (others). Token is appended to the URL on startup (`http://server:9101/?t=<token>`) and persisted in a cookie after first visit. Rotate with `veeam-vhc-aws ui --regen-token`.
+
+**Coexistence with the scheduled task:** The UI is purely an operator console — it reads the state file the scheduled task writes. You can run the UI continuously without affecting the every-5-minutes monitor task. Changes to `config.yaml` made via the UI are picked up by the next scheduled run automatically.
+
+**Live updates:** Alerts page auto-refreshes every 5 seconds; Dashboard every 10 seconds. If the scheduled task writes new findings, you'll see them appear without manual refresh.
+
+### Interactive Terminal UX
+
+When run in an interactive terminal, veeam-vhc-aws renders a rich terminal UI using Spectre.Console. When run as a scheduled task, Windows service, or with output piped/redirected, all rich output is automatically suppressed and the tool behaves as a standard JSON-emitting CLI — no configuration required.
+
+**First-run detection:** If you run `veeam-vhc-aws` with no arguments and no config file exists, the tool offers to launch the setup wizard automatically.
+
+**Setup wizard (`setup`):** A 7-step guided wizard that collects server details (with live connectivity test), notification channels, output options, and alert thresholds — then writes an encrypted config file ready to use. Passwords are obfuscated on disk automatically. Use `--template` to get the old behavior (copy the example config file).
+
+**Live monitor progress (`all`):** While monitors run, a live table shows each server × monitor with a real-time status indicator. Only shown when no `json_stdout` output handler is configured (to avoid mixing UI chrome with JSON output).
+
+```
+╭─────────────┬───────────────┬──────────────╮
+│ Server      │ Monitor       │ Status       │
+├─────────────┼───────────────┼──────────────┤
+│ prod-vbr    │ repo_health   │ Done — OK    │
+│ prod-vbr    │ retention     │ Running...   │
+│ prod-vbaws  │ worker_health │ Queued       │
+╰─────────────┴───────────────┴──────────────╯
+```
+
+**Results table (`all`):** After monitors complete, findings are displayed grouped by severity (errors → critical → warning), with a one-line status summary above the table.
+
+**Connection test (`test-connection`):** Live progress spinner per target, then a results table. Failed connections include actionable hints (e.g., `— check username/password`, `— set verify_ssl: false or trust the cert`).
+
+**`--no-interactive` flag:** Globally suppresses all interactive output regardless of terminal detection. Equivalent to piping output. Useful for automation scripts that run in a terminal but should not trigger the interactive UI.
 
 ### Alert Deduplication
 

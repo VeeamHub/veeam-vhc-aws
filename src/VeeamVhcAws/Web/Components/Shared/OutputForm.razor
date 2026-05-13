@@ -1,0 +1,230 @@
+@code {
+    [Parameter, EditorRequired] public OutputView Model { get; set; } = new("webhook", new());
+    [Parameter] public bool IsNew { get; set; }
+    [Parameter] public EventCallback<OutputEdit> OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string _type = "webhook";
+    private Dictionary<string, object?> _fields = new();
+    private HashSet<string> _changedSecrets = new();
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        _type = Model.Type;
+        _fields = new Dictionary<string, object?>(Model.Fields);
+        _changedSecrets = new HashSet<string>();
+        EnsureDefaults();
+    }
+
+    private void EnsureDefaults()
+    {
+        switch (_type)
+        {
+            case "webhook":
+                _fields.TryAdd("url", "");
+                _fields.TryAdd("template", "generic");
+                _fields.TryAdd("min_severity", "warning");
+                _fields.TryAdd("deduplicate", true);
+                break;
+            case "email":
+                _fields.TryAdd("smtp_host", "");
+                _fields.TryAdd("smtp_port", 587);
+                _fields.TryAdd("from_addr", "");
+                _fields.TryAdd("to_addrs", "");
+                _fields.TryAdd("min_severity", "critical");
+                _fields.TryAdd("smtp_username", "");
+                _fields.TryAdd("smtp_password", "");
+                _fields.TryAdd("use_tls", true);
+                break;
+            case "prometheus":
+                _fields.TryAdd("mode", "pushgateway");
+                _fields.TryAdd("url", "localhost:9091");
+                _fields.TryAdd("job", "veeam_vhc_aws");
+                _fields.TryAdd("port", 9100);
+                break;
+            case "json_file":
+                _fields.TryAdd("path", "./veeam-vhc-aws-output.json");
+                _fields.TryAdd("rotate", false);
+                _fields.TryAdd("max_files", 30);
+                break;
+        }
+    }
+
+    private void OnTypeChange(ChangeEventArgs e)
+    {
+        _type = e.Value?.ToString() ?? "webhook";
+        _fields.Clear();
+        EnsureDefaults();
+    }
+
+    private string Get(string key) => _fields.GetValueOrDefault(key)?.ToString() ?? "";
+    private int GetInt(string key, int dflt) =>
+        int.TryParse(_fields.GetValueOrDefault(key)?.ToString(), out var i) ? i : dflt;
+    private bool GetBool(string key) =>
+        _fields.GetValueOrDefault(key) switch { bool b => b, string s => s == "true", _ => false };
+
+    private void SetString(string key, ChangeEventArgs e) => _fields[key] = e.Value?.ToString() ?? "";
+    private void SetBool(string key, ChangeEventArgs e) => _fields[key] = e.Value is bool b ? b : (e.Value?.ToString() == "true");
+    private void SetInt(string key, ChangeEventArgs e, int dflt)
+    {
+        _fields[key] = int.TryParse(e.Value?.ToString(), out var v) ? v : dflt;
+    }
+    private void SetSecret(string key, ChangeEventArgs e)
+    {
+        _fields[key] = e.Value?.ToString() ?? "";
+        _changedSecrets.Add(key);
+    }
+
+    private async Task Save()
+    {
+        _error = null;
+        if (_type == "webhook" && string.IsNullOrWhiteSpace(Get("url")))
+        { _error = "Webhook URL is required"; return; }
+        if (_type == "email" && string.IsNullOrWhiteSpace(Get("smtp_host")))
+        { _error = "SMTP host is required"; return; }
+        if (_type == "json_file" && string.IsNullOrWhiteSpace(Get("path")))
+        { _error = "File path is required"; return; }
+
+        await OnSave.InvokeAsync(new OutputEdit(_type, _fields, _changedSecrets));
+    }
+}
+
+<div class="modal-overlay" @onclick="OnCancel">
+    <div class="modal" @onclick:stopPropagation="true">
+        <h2>@(IsNew ? "Add Output Handler" : $"Edit {_type}")</h2>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="form-error">@_error</div>
+        }
+
+        <div class="form-row">
+            <label>Type</label>
+            <select value="@_type" @onchange="OnTypeChange" disabled="@(!IsNew)">
+                <option value="webhook">Webhook (Slack/Teams/ntfy/PagerDuty)</option>
+                <option value="email">Email (SMTP)</option>
+                <option value="prometheus">Prometheus</option>
+                <option value="json_file">JSON file</option>
+                <option value="json_stdout">JSON stdout (no config)</option>
+            </select>
+        </div>
+
+        @if (_type == "webhook")
+        {
+            <div class="form-row">
+                <label>URL</label>
+                <input type="text" value="@Get("url")" @oninput="@(e => SetString("url", e))" placeholder="https://hooks.slack.com/…" />
+            </div>
+            <div class="form-row">
+                <label>Template</label>
+                <select value="@Get("template")" @onchange="@(e => SetString("template", e))">
+                    <option value="generic">Generic</option>
+                    <option value="slack">Slack</option>
+                    <option value="teams">Microsoft Teams</option>
+                    <option value="ntfy">ntfy</option>
+                    <option value="pagerduty">PagerDuty</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Min Severity</label>
+                <select value="@Get("min_severity")" @onchange="@(e => SetString("min_severity", e))">
+                    <option value="ok">OK</option>
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" checked="@GetBool("deduplicate")" @onchange="@(e => SetBool("deduplicate", e))" /> Deduplicate (only alert on changes)</label>
+            </div>
+        }
+        else if (_type == "email")
+        {
+            <div class="form-row">
+                <label>SMTP host</label>
+                <input type="text" value="@Get("smtp_host")" @oninput="@(e => SetString("smtp_host", e))" placeholder="smtp.office365.com" />
+            </div>
+            <div class="form-row">
+                <label>SMTP port</label>
+                <input type="text" value="@GetInt("smtp_port", 587)" @oninput="@(e => SetInt("smtp_port", e, 587))" />
+            </div>
+            <div class="form-row">
+                <label>From address</label>
+                <input type="text" value="@Get("from_addr")" @oninput="@(e => SetString("from_addr", e))" placeholder="veeam-vhc-aws@example.com" />
+            </div>
+            <div class="form-row">
+                <label>To addresses <span class="muted">(comma-separated)</span></label>
+                <input type="text" value="@Get("to_addrs")" @oninput="@(e => SetString("to_addrs", e))" placeholder="oncall@example.com, ops@example.com" />
+            </div>
+            <div class="form-row">
+                <label>Min Severity</label>
+                <select value="@Get("min_severity")" @onchange="@(e => SetString("min_severity", e))">
+                    <option value="ok">OK</option>
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>SMTP username <span class="muted">(optional)</span></label>
+                <input type="text" value="@Get("smtp_username")" @oninput="@(e => SetString("smtp_username", e))" />
+            </div>
+            <div class="form-row">
+                <label>SMTP password</label>
+                <input type="password" value="@(_changedSecrets.Contains("smtp_password") ? Get("smtp_password") : "********")"
+                       @oninput="@(e => SetSecret("smtp_password", e))" />
+                @if (!IsNew && !_changedSecrets.Contains("smtp_password"))
+                {
+                    <span class="muted">(unchanged — leave as-is to keep existing)</span>
+                }
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" checked="@GetBool("use_tls")" @onchange="@(e => SetBool("use_tls", e))" /> Use TLS (StartTLS on port 587)</label>
+            </div>
+        }
+        else if (_type == "prometheus")
+        {
+            <div class="form-row">
+                <label>Mode</label>
+                <select value="@Get("mode")" @onchange="@(e => SetString("mode", e))">
+                    <option value="pushgateway">Pushgateway (push metrics out)</option>
+                    <option value="server">Server (expose /metrics endpoint)</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>Pushgateway URL</label>
+                <input type="text" value="@Get("url")" @oninput="@(e => SetString("url", e))" placeholder="localhost:9091" />
+            </div>
+            <div class="form-row">
+                <label>Job label</label>
+                <input type="text" value="@Get("job")" @oninput="@(e => SetString("job", e))" />
+            </div>
+            <div class="form-row">
+                <label>Server port</label>
+                <input type="text" value="@GetInt("port", 9100)" @oninput="@(e => SetInt("port", e, 9100))" />
+            </div>
+        }
+        else if (_type == "json_file")
+        {
+            <div class="form-row">
+                <label>File path</label>
+                <input type="text" value="@Get("path")" @oninput="@(e => SetString("path", e))" placeholder="./veeam-vhc-aws-output.json" />
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" checked="@GetBool("rotate")" @onchange="@(e => SetBool("rotate", e))" /> Rotate file daily</label>
+            </div>
+            <div class="form-row">
+                <label>Max rotated files</label>
+                <input type="text" value="@GetInt("max_files", 30)" @oninput="@(e => SetInt("max_files", e, 30))" />
+            </div>
+        }
+        else if (_type == "json_stdout")
+        {
+            <p class="muted">No configuration needed. Emits all findings as JSON to stdout (used by scheduled tasks).</p>
+        }
+
+        <div class="form-actions">
+            <button class="btn-secondary" @onclick="OnCancel">Cancel</button>
+            <button class="btn" @onclick="Save">Save</button>
+        </div>
+    </div>
+</div>

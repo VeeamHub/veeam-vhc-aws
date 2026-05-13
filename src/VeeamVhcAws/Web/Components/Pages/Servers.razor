@@ -1,0 +1,148 @@
+@page "/servers"
+@rendermode InteractiveServer
+@inject ConfigService Config
+
+<PageTitle>Servers — Veeam VHC AWS</PageTitle>
+
+<div class="page-header">
+    <h1>Servers</h1>
+    <button class="btn" @onclick="AddServer">+ Add Server</button>
+</div>
+
+@if (_cfg is null)
+{
+    <p>Loading…</p>
+}
+else if (_cfg.Servers.Count == 0)
+{
+    <div class="empty">
+        <p>No servers configured yet.</p>
+        <button class="btn" @onclick="AddServer">+ Add Your First Server</button>
+    </div>
+}
+else
+{
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>URL</th>
+                <th>Username</th>
+                <th>Verify SSL</th>
+                <th>API Version</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var s in _cfg.Servers)
+            {
+                <tr>
+                    <td><strong>@s.Name</strong></td>
+                    <td>@s.Type.ToUpperInvariant()</td>
+                    <td>@s.Url</td>
+                    <td>@s.Username</td>
+                    <td>@(s.VerifySsl ? "yes" : "no")</td>
+                    <td>@(string.IsNullOrEmpty(s.ApiVersion) ? "—" : s.ApiVersion)</td>
+                    <td>
+                        <button class="btn btn-small" @onclick="() => EditServer(s)">Edit</button>
+                        <button class="btn btn-small btn-warn" @onclick="() => DeleteServer(s.Name)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (_editing is not null)
+{
+    <ServerForm Model="_editing" IsNew="_isNew" OnSave="SaveServer" OnCancel="CancelEdit" />
+}
+
+@if (_confirmingDelete is not null)
+{
+    <div class="modal-overlay" @onclick="() => _confirmingDelete = null">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h2>Delete server?</h2>
+            <p>Are you sure you want to delete <strong>@_confirmingDelete</strong>? This cannot be undone via the UI (you can re-add it manually).</p>
+            <div class="form-actions">
+                <button class="btn-secondary" @onclick="() => _confirmingDelete = null">Cancel</button>
+                <button class="btn btn-warn" @onclick="ConfirmDelete">Delete</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_flash))
+{
+    <div class="flash">@_flash</div>
+}
+
+@code {
+    private ConfigSnapshot? _cfg;
+    private ServerEdit? _editing;
+    private bool _isNew;
+    private string? _confirmingDelete;
+    private string? _flash;
+
+    protected override void OnInitialized() => Refresh();
+
+    private void Refresh() => _cfg = Config.Load();
+
+    private void AddServer()
+    {
+        _editing = new ServerEdit("", "vbr", "", "", "", true, false, "1.3-rev1");
+        _isNew = true;
+    }
+
+    private void EditServer(ServerView s)
+    {
+        _editing = new ServerEdit(s.Name, s.Type, s.Url, s.Username, "", false, s.VerifySsl, s.ApiVersion);
+        _isNew = false;
+    }
+
+    private void CancelEdit() => _editing = null;
+
+    private void SaveServer(ServerEdit edit)
+    {
+        var current = _cfg?.Servers.Select(s => new ServerEdit(s.Name, s.Type, s.Url, s.Username, "", false, s.VerifySsl, s.ApiVersion)).ToList() ?? new();
+
+        if (_isNew)
+        {
+            if (current.Any(c => string.Equals(c.Name, edit.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                _flash = $"Server '{edit.Name}' already exists";
+                return;
+            }
+            current.Add(edit);
+        }
+        else
+        {
+            var idx = current.FindIndex(c => string.Equals(c.Name, edit.Name, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) current[idx] = edit;
+            else current.Add(edit);
+        }
+
+        Config.SaveServers(current);
+        _flash = _isNew ? $"Server '{edit.Name}' added" : $"Server '{edit.Name}' updated";
+        _editing = null;
+        Refresh();
+    }
+
+    private void DeleteServer(string name) => _confirmingDelete = name;
+
+    private void ConfirmDelete()
+    {
+        if (_confirmingDelete is null || _cfg is null) return;
+        var name = _confirmingDelete;
+        var current = _cfg.Servers
+            .Where(s => !string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+            .Select(s => new ServerEdit(s.Name, s.Type, s.Url, s.Username, "", false, s.VerifySsl, s.ApiVersion))
+            .ToList();
+
+        Config.SaveServers(current);
+        _flash = $"Server '{name}' deleted";
+        _confirmingDelete = null;
+        Refresh();
+    }
+}

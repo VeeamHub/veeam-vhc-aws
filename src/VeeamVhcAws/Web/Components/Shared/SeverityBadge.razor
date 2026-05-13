@@ -1,0 +1,8 @@
+@code {
+    [Parameter, EditorRequired] public string Severity { get; set; } = "ok";
+
+    private string CssClass => $"sev-badge sev-{Severity.ToLowerInvariant()}";
+    private string Label => Severity.ToUpperInvariant();
+}
+
+<span class="@CssClass">@Label</span>

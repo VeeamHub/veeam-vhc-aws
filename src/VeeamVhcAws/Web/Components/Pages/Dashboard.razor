@@ -1,0 +1,111 @@
+@page "/"
+@rendermode InteractiveServer
+@inject StateService State
+@inject ConfigService Config
+@implements IDisposable
+
+<PageTitle>Dashboard — Veeam VHC AWS</PageTitle>
+
+<h1>Dashboard</h1>
+
+@if (_state is null || _cfg is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    var crit = _state.ActiveFindings.Count(a => a.Severity == "critical");
+    var warn = _state.ActiveFindings.Count(a => a.Severity == "warning");
+    var err  = _state.ActiveFindings.Count(a => a.Severity == "error");
+    var ok   = err == 0 && crit == 0 && warn == 0;
+
+    <section class="status-banner @(ok ? "ok" : "alert")">
+        @if (ok)
+        {
+            <strong>[OK]</strong> <span>All monitors clear — @_cfg.Servers.Count server(s), 0 findings</span>
+        }
+        else
+        {
+            <strong>[!!]</strong>
+            <span>
+                @if (err > 0) { @($"{err} error ") }
+                @if (crit > 0) { @($"{crit} critical ") }
+                @if (warn > 0) { @($"{warn} warning ") }
+                — action required
+            </span>
+        }
+    </section>
+
+    <section class="card-grid">
+        <div class="card">
+            <h3>Servers</h3>
+            <p class="big-number">@_cfg.Servers.Count</p>
+            <p class="card-sub">@($"{_cfg.Servers.Count(s => s.Type == "vbr")} VBR, {_cfg.Servers.Count(s => s.Type == "vbaws")} VBAWS")</p>
+        </div>
+        <div class="card">
+            <h3>Active Findings</h3>
+            <p class="big-number">@_state.ActiveFindings.Count</p>
+            <p class="card-sub">@($"{crit} critical, {warn} warning")</p>
+        </div>
+        <div class="card">
+            <h3>Captured Errors</h3>
+            <p class="big-number">@_state.CapturedErrors.Count</p>
+            <p class="card-sub">@($"{_state.CapturedErrors.Count(a => a.Suppressed)} suppressed")</p>
+        </div>
+        <div class="card">
+            <h3>Last Run</h3>
+            <p class="big-number">@(_state.LastRun?.ToLocalTime().ToString("HH:mm") ?? "—")</p>
+            <p class="card-sub">@(_state.LastRun?.ToLocalTime().ToString("yyyy-MM-dd") ?? "no runs yet")</p>
+        </div>
+    </section>
+
+    <section>
+        <h2>Servers</h2>
+        @if (_cfg.Servers.Count == 0)
+        {
+            <p>No servers configured. <a href="servers">Add a server</a> to begin.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr><th>Name</th><th>Type</th><th>URL</th><th>Last successful run</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _cfg.Servers)
+                    {
+                        var lastVbr = _state.LastSuccessByKey.GetValueOrDefault($"{s.Name}:repo_health");
+                        var lastVbaws = _state.LastSuccessByKey.GetValueOrDefault($"{s.Name}:worker_health");
+                        var last = s.Type == "vbr" ? lastVbr : lastVbaws;
+                        <tr>
+                            <td><strong>@s.Name</strong></td>
+                            <td>@s.Type.ToUpperInvariant()</td>
+                            <td>@s.Url</td>
+                            <td>@(last == default ? "—" : last.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+    private StateSnapshot? _state;
+    private ConfigSnapshot? _cfg;
+    private System.Threading.Timer? _autoRefresh;
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        _autoRefresh = new System.Threading.Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+    }
+
+    private void Refresh()
+    {
+        _state = State.Load();
+        _cfg = Config.Load();
+    }
+
+    public void Dispose() => _autoRefresh?.Dispose();
+}

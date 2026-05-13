@@ -4,6 +4,7 @@ using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
 using VeeamVhcAws.Core.State;
 using VeeamVhcAws.Monitors;
+using VeeamVhcAws.Ui;
 
 namespace VeeamVhcAws.Infrastructure;
 
@@ -17,7 +18,8 @@ public static class MonitorRunner
         Dictionary<string, object> config,
         PatternEngine? patternEngine,
         string? monitorFilter = null,
-        FindingState? findingState = null)
+        FindingState? findingState = null,
+        IProgress<MonitorProgressEvent>? progress = null)
     {
         var allResults = new List<MonitorResult>();
 
@@ -25,9 +27,8 @@ public static class MonitorRunner
         {
             Logger.Information("Running {Count} servers in parallel (threshold={Threshold})",
                 servers.Count, ParallelThreshold);
-            var maxWorkers = Math.Min(servers.Count, 20);
             var tasks = servers.Select(ctx =>
-                Task.Run(() => RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState))
+                Task.Run(() => RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState, progress))
             ).ToArray();
 
             try
@@ -52,7 +53,7 @@ public static class MonitorRunner
         {
             foreach (var ctx in servers)
             {
-                var results = RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState);
+                var results = RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState, progress);
                 allResults.AddRange(results);
             }
         }
@@ -65,7 +66,8 @@ public static class MonitorRunner
         Dictionary<string, object> config,
         PatternEngine? patternEngine,
         string? monitorFilter,
-        FindingState? findingState)
+        FindingState? findingState,
+        IProgress<MonitorProgressEvent>? progress = null)
     {
         var applicable = GetApplicableMonitors(monitorFilter, serverCtx, config);
         if (applicable.Count == 0)
@@ -74,6 +76,13 @@ public static class MonitorRunner
         var results = new List<MonitorResult>();
         foreach (var (name, factory) in applicable)
         {
+            progress?.Report(new MonitorProgressEvent
+            {
+                Server = serverCtx.Name,
+                Monitor = name,
+                Status = MonitorProgressStatus.Running,
+            });
+
             try
             {
                 var monitor = factory(config);
@@ -99,6 +108,14 @@ public static class MonitorRunner
                     name, serverCtx.Name, result.OverallSeverity.ToLowerString(),
                     result.Findings.Count, result.Errors.Count, result.DurationMs);
 
+                progress?.Report(new MonitorProgressEvent
+                {
+                    Server = serverCtx.Name,
+                    Monitor = name,
+                    Status = MonitorProgressStatus.Completed,
+                    Result = result,
+                });
+
                 // Track last successful run time for adaptive lookback
                 if (result.Errors.Count == 0 && findingState != null)
                 {
@@ -110,7 +127,7 @@ public static class MonitorRunner
             {
                 Logger.Error("Monitor {Monitor} failed on server '{Server}': {Error}", name, serverCtx.Name, e.Message);
                 var monitorType = MonitorTypeExtensions.ParseMonitorType(name);
-                results.Add(new MonitorResult(
+                var errorResult = new MonitorResult(
                     monitor: monitorType,
                     timestamp: DateTime.UtcNow,
                     durationMs: 0,
@@ -121,7 +138,16 @@ public static class MonitorRunner
                             $"Server unreachable: {(e.Message.Length > 150 ? e.Message[..150] : e.Message)}")
                     },
                     server: serverCtx.Name,
-                    errors: new List<string> { e.Message }));
+                    errors: new List<string> { e.Message });
+                results.Add(errorResult);
+
+                progress?.Report(new MonitorProgressEvent
+                {
+                    Server = serverCtx.Name,
+                    Monitor = name,
+                    Status = MonitorProgressStatus.Failed,
+                    Result = errorResult,
+                });
             }
         }
         return results;
