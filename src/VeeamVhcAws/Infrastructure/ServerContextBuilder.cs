@@ -18,6 +18,7 @@ public static class ServerContextBuilder
         var password = PasswordObfuscator.Deobfuscate(serverCfg.Get("password", ""));
         var verifySsl = serverCfg.Get("verify_ssl", true);
         var timeout = globalCfg.Get("timeout_seconds", 30);
+        var sessionTimeout = globalCfg.Get("session_timeout_seconds", 120);
         var retryCount = globalCfg.Get("retry_count", 2);
         var retryDelay = globalCfg.Get("retry_delay_seconds", 5);
         var pageSize = globalCfg.Get("page_size", 500);
@@ -30,7 +31,7 @@ public static class ServerContextBuilder
         {
             var apiVersion = serverCfg.Get("api_version", "1.3-rev1");
             var auth = new VbrAuth(url, username, password, apiVersion, verifySsl);
-            vbrClient = new VbrClient(url, auth, verifySsl, timeout, retryCount, retryDelay, apiVersion, pageSize, maxPages);
+            vbrClient = new VbrClient(url, auth, verifySsl, timeout, retryCount, retryDelay, apiVersion, pageSize, maxPages, sessionTimeout);
         }
         else if (serverType == "vbaws")
         {

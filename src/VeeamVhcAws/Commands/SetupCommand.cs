@@ -117,6 +117,7 @@ public static class SetupCommand
     private const string MinimalConfig = @"# veeam-vhc-aws.yaml — Edit this file with your server details
 global:
   timeout_seconds: 30
+  session_timeout_seconds: 600  # /api/v1/sessions timeout; raise for very large deployments (e.g. 1200)
   retry_count: 2
   logging:
     level: INFO

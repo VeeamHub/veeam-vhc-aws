@@ -96,7 +96,7 @@ public class PerformanceIntegrationTests : IDisposable
                 .WithDelay(TimeSpan.FromSeconds(5))
         );
 
-        var client = new VbrClient(_server.Url!, MakeAuth(), verifySsl: false, timeout: 2, retryCount: 0);
+        var client = new VbrClient(_server.Url!, MakeAuth(), verifySsl: false, timeout: 2, retryCount: 0, sessionTimeout: 2);
 
         Assert.Throws<TaskCanceledException>(() => client.GetSessions(lookbackHours: 24));
     }
@@ -156,7 +156,7 @@ public class PerformanceIntegrationTests : IDisposable
         );
 
         var client = new VbrClient(_server.Url!, MakeAuth(), verifySsl: false,
-            timeout: 2, retryCount: 1, retryDelay: 1);
+            timeout: 2, retryCount: 1, retryDelay: 1, sessionTimeout: 2);
 
         Assert.Throws<TaskCanceledException>(() => client.GetSessions(lookbackHours: 24));
     }

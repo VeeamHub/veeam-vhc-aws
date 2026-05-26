@@ -31,6 +31,7 @@ public static class ConfigLoader
         {
             ["log_level"] = "DEBUG",
             ["timeout_seconds"] = 30,
+            ["session_timeout_seconds"] = 600,
             ["retry_count"] = 2,
             ["retry_delay_seconds"] = 5,
             ["logging"] = new Dictionary<string, object>

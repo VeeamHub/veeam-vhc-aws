@@ -2,6 +2,7 @@
 
 global:
   timeout_seconds: 30
+  session_timeout_seconds: 600  # /api/v1/sessions timeout (seconds); raise for very large deployments (e.g. 1200 for 20 min)
   retry_count: 2
   retry_delay_seconds: 5
 

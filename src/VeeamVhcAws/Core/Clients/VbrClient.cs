@@ -13,6 +13,7 @@ public class VbrClient : IVbrClient
     private readonly VbrAuth _auth;
     private readonly bool _verifySsl;
     private readonly int _timeout;
+    private readonly int _sessionTimeout;
     private readonly int _retryCount;
     private readonly int _retryDelay;
     private readonly string _apiVersion;
@@ -21,12 +22,14 @@ public class VbrClient : IVbrClient
 
     public VbrClient(string baseUrl, VbrAuth auth, bool verifySsl = true,
         int timeout = 30, int retryCount = 2, int retryDelay = 5,
-        string apiVersion = "1.3-rev1", int pageSize = 500, int maxPages = 100)
+        string apiVersion = "1.3-rev1", int pageSize = 500, int maxPages = 100,
+        int sessionTimeout = 600)
     {
         _baseUrl = baseUrl.TrimEnd('/');
         _auth = auth;
         _verifySsl = verifySsl;
         _timeout = timeout;
+        _sessionTimeout = Math.Max(sessionTimeout, timeout);
         _retryCount = retryCount;
         _retryDelay = retryDelay;
         _apiVersion = apiVersion;
@@ -34,18 +37,21 @@ public class VbrClient : IVbrClient
         _maxPages = maxPages;
     }
 
-    private HttpClient CreateClient()
+    private HttpClient CreateClient() => CreateClientWithTimeout(_timeout);
+
+    private HttpClient CreateClientWithTimeout(int timeoutSeconds)
     {
         var handler = new HttpClientHandler();
         if (!_verifySsl)
             handler.ServerCertificateCustomValidationCallback =
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
 
-        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(_timeout) };
+        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
     }
 
     private Dictionary<string, object> Request(string method, string path,
-        Dictionary<string, string>? queryParams = null, object? jsonBody = null)
+        Dictionary<string, string>? queryParams = null, object? jsonBody = null,
+        int? timeoutSeconds = null)
     {
         var url = $"{_baseUrl}{path}";
         if (queryParams != null && queryParams.Count > 0)
@@ -62,7 +68,9 @@ public class VbrClient : IVbrClient
             try
             {
                 var headers = _auth.GetHeaders();
-                using var client = CreateClient();
+                using var client = timeoutSeconds.HasValue
+                    ? CreateClientWithTimeout(timeoutSeconds.Value)
+                    : CreateClient();
                 var request = new HttpRequestMessage(new HttpMethod(method), url);
                 foreach (var (key, value) in headers)
                     request.Headers.TryAddWithoutValidation(key, value);
@@ -181,7 +189,8 @@ public class VbrClient : IVbrClient
                     ["createdAfter"] = createdAfter,
                     ["limit"] = _pageSize.ToString(),
                     ["skip"] = offset.ToString()
-                });
+                },
+                timeoutSeconds: _sessionTimeout);
             var page = ExtractDataList(result);
             pageCount++;
             if (page.Count == 0)
