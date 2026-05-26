@@ -89,7 +89,7 @@ jobs:
 
       # --- Azure Trusted Signing ---
       - name: Sign exe (Azure Trusted Signing)
-        uses: azure/trusted-signing-action@v0
+        uses: azure/trusted-signing-action@v2
         with:
           endpoint: https://eus.codesigning.azure.net/
           trusted-signing-account-name: vadamc
