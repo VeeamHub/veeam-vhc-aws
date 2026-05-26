@@ -40,6 +40,15 @@ public class AuthMiddleware
             return;
         }
 
+        // Allow Blazor static framework assets (JS/WASM) without auth.
+        // /_blazor (SignalR hub) is NOT bypassed — cookie auth is already set by the
+        // time the circuit connects, so the hub requests pass through IsAuthenticated normally.
+        if (path.StartsWith("/_framework", StringComparison.OrdinalIgnoreCase))
+        {
+            await _next(context);
+            return;
+        }
+
         if (IsAuthenticated(context))
         {
             await _next(context);

@@ -19,6 +19,11 @@ else
     var err  = _state.ActiveFindings.Count(a => a.Severity == "error");
     var ok   = err == 0 && crit == 0 && warn == 0;
 
+    var serversClass  = "card-neutral";
+    var findingsClass = FindingsCardClass(crit, warn, err);
+    var errorsClass   = ErrorsCardClass(_state.CapturedErrors);
+    var lastRunClass  = LastRunCardClass(_state.LastRun);
+
     <section class="status-banner @(ok ? "ok" : "alert")">
         @if (ok)
         {
@@ -37,22 +42,22 @@ else
     </section>
 
     <section class="card-grid">
-        <div class="card">
+        <div class="card @serversClass">
             <h3>Servers</h3>
             <p class="big-number">@_cfg.Servers.Count</p>
             <p class="card-sub">@($"{_cfg.Servers.Count(s => s.Type == "vbr")} VBR, {_cfg.Servers.Count(s => s.Type == "vbaws")} VBAWS")</p>
         </div>
-        <div class="card">
+        <div class="card @findingsClass">
             <h3>Active Findings</h3>
             <p class="big-number">@_state.ActiveFindings.Count</p>
             <p class="card-sub">@($"{crit} critical, {warn} warning")</p>
         </div>
-        <div class="card">
+        <div class="card @errorsClass">
             <h3>Captured Errors</h3>
             <p class="big-number">@_state.CapturedErrors.Count</p>
             <p class="card-sub">@($"{_state.CapturedErrors.Count(a => a.Suppressed)} suppressed")</p>
         </div>
-        <div class="card">
+        <div class="card @lastRunClass">
             <h3>Last Run</h3>
             <p class="big-number">@(_state.LastRun?.ToLocalTime().ToString("HH:mm") ?? "—")</p>
             <p class="card-sub">@(_state.LastRun?.ToLocalTime().ToString("yyyy-MM-dd") ?? "no runs yet")</p>
@@ -108,4 +113,22 @@ else
     }
 
     public void Dispose() => _autoRefresh?.Dispose();
+
+    private static string FindingsCardClass(int crit, int warn, int err)
+    {
+        if (crit > 0) return "card-crit";
+        if (warn > 0 || err > 0) return "card-warn";
+        return "card-ok";
+    }
+
+    private static string ErrorsCardClass(IReadOnlyList<AlertView> errors)
+    {
+        if (errors.Count == 0) return "card-neutral";
+        return errors.Any(a => !a.Suppressed) ? "card-warn" : "card-ok";
+    }
+
+    private static string LastRunCardClass(DateTime? lastRun) =>
+        lastRun is null || (DateTime.UtcNow - lastRun.Value).TotalHours > 1
+            ? "card-warn"
+            : "card-ok";
 }

@@ -33,7 +33,7 @@ public static class WebHost
         var app = builder.Build();
 
         app.UseMiddleware<AuthMiddleware>();
-        app.UseStaticFiles();
+        app.MapStaticAssets();
         app.UseAntiforgery();
 
         app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
@@ -44,7 +44,7 @@ public static class WebHost
         app.MapDelete("/api/alerts/{key}/suppress", (string key, StateService s) =>
             s.Unsuppress(key) ? Results.Ok() : Results.NotFound());
 
-        app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+        app.MapRazorComponents<App>().AddInteractiveServerRenderMode().WithStaticAssets();
 
         Logger.Information("Web UI listening on http://{Bind}:{Port}", options.BindAddress, options.Port);
         await app.RunAsync(cancellationToken);
