@@ -91,7 +91,7 @@ jobs:
           echo "::warning::VirusTotal analysis did not complete within 10 minutes."
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: veeam-vhc-aws-win-x64
           path: dist/win-x64/veeam-vhc-aws.exe
