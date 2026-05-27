@@ -24,9 +24,7 @@
 ---
 
 > [!NOTE]
-> Veeam VHC AWS is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, Veeam VHC AWS runs continuously and alerts you the moment something goes wrong.
-
-> This is a community-supported tool and is not an officially supported Veeam product.
+> Veeam VHC AWS is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, Veeam VHC AWS runs continuously and alerts you the moment something goes wrong. **This is not an officially supported Veeam product.**
 
 ## ⚡ Quickstart (60 seconds)
 
@@ -107,7 +105,9 @@ dotnet run --project src/VeeamVhcAws -- all -c veeam-vhc-aws.yaml   # Run all mo
 
 ```bash
 docker build -t veeam-vhc-aws .
-docker run -v /path/to/config.yaml:/config/config.yaml veeam-vhc-aws
+docker run -v /path/to/config.yaml:/config/veeam-vhc-aws.yaml \
+  -e VEEAM_VHC_AWS_CONFIG=/config/veeam-vhc-aws.yaml \
+  veeam-vhc-aws
 ```
 
 > The Docker image is built with the .NET 10 SDK and runs as a self-contained binary on a minimal `runtime-deps` base image.
@@ -158,17 +158,6 @@ veeam-vhc-aws all -c config.yaml --no-interactive
 ```
 
 ### Web Admin GUI
-
-<p align="center">
-  <img src="docs/images/web-admin-ui.png" alt="Veeam VHC AWS web admin UI — Dashboard and Alerts pages" width="800">
-</p>
-
-<!--
-  To replace the screenshot:
-  1. Take a PNG capture of the Dashboard (1200-1600px wide is ideal).
-  2. Optionally include a second composited shot of the Alerts page.
-  3. Save as docs/images/web-admin-ui.png in this repo.
--->
 
 The `ui` command launches a browser-based admin dashboard — embedded ASP.NET Core + Blazor Server hosted by the same `veeam-vhc-aws.exe`. No separate install or web server required.
 
@@ -246,7 +235,7 @@ veeam-vhc-aws tracks finding state between runs so you only get notified when so
 
 State is stored in `veeam-vhc-aws-state.json` (default: `C:\ProgramData\VHC\veeam-vhc-aws-state.json` on Windows). Deleting this file resets all state — every existing finding will re-alert on the next run.
 
-To enable deduplication on webhook handlers, add `deduplicate: true` to the handler config:
+Deduplication is **on by default** for all output handlers. To disable it for a specific handler (e.g., to always send every alert regardless of state), add `deduplicate: false`:
 
 ```yaml
 output:
@@ -254,7 +243,7 @@ output:
     url: https://ntfy.sh/my-veeam-alerts
     template: ntfy
     min_severity: warning
-    deduplicate: true
+    deduplicate: false   # send on every run, even if finding already active
 ```
 
 ### Daily Summary
@@ -266,7 +255,7 @@ Veeam VHC AWS can send a daily health digest showing the complete status of all 
 **Run on demand:**
 
 ```powershell
-.\veeam-vhc-aws.exe summary -c C:\ProgramData\VHC\veeam-vhc-aws.yaml
+.\veeam-vhc-aws.exe summary -c "$env:ProgramFiles\VHC\veeam-vhc-aws.yaml"
 ```
 
 **Config options:**
@@ -297,7 +286,7 @@ The worst severity across all findings determines the exit code, making it CI/CD
 
 Config file resolution order:
 1. `-c` / `--config` CLI argument
-2. `VHC_MONITOR_CONFIG` environment variable
+2. `VEEAM_VHC_AWS_CONFIG` environment variable
 3. `./veeam-vhc-aws.yaml` in the current directory
 
 See [`config/example.yaml`](config/example.yaml) for the full configuration reference including server setup, thresholds, output handlers, and error patterns.
@@ -358,7 +347,7 @@ servers:
 > ```
 > Double-quoted values (`"..."`) process backslash sequences — `\n` becomes a newline, `\t` a tab, etc. Single-quoted values are always literal. If you do use double quotes, escape every backslash: `"DOMAIN\\backupadmin"`.
 
-- **Dynamic parallelism:** 2 or fewer servers run sequentially. 3+ run in parallel (up to 20 workers).
+- **Dynamic parallelism:** 2 or fewer servers run sequentially. 3+ run fully in parallel.
 - **Failure isolation:** If one server is unreachable, the others continue normally.
 - **Server prefixing:** All findings include the server name (e.g., `[prod-vbr] repo:Backup Copy Repo`).
 
@@ -409,7 +398,7 @@ output:
 
 ### Logging
 
-Log files rotate daily and are stored alongside the config by default. Key options:
+Log files rotate daily. On Windows standalone installs, logs are written to `C:\ProgramData\VHC\logs\`. Key options:
 
 ```yaml
 global:
@@ -448,7 +437,7 @@ Logs are small in normal operation. The table below shows estimates for a repres
 
 ### Upgrading
 
-To upgrade without re-running the full setup wizard — your config, state, and logs in `C:\ProgramData\VHC\` are untouched.
+To upgrade without re-running the full setup wizard — your config (`C:\Program Files\VHC\`), state, and logs (`C:\ProgramData\VHC\`) are untouched.
 
 #### Windows Standalone (Recommended)
 
@@ -476,7 +465,7 @@ Start-ScheduledTask -TaskName "Veeam VHC AWS"
 ```
 
 > [!NOTE]
-> Your config (`C:\ProgramData\VHC\veeam-vhc-aws.yaml`), alert state (`veeam-vhc-aws-state.json`), and logs are stored separately and are never touched by an upgrade.
+> Your config (`C:\Program Files\VHC\veeam-vhc-aws.yaml`), alert state (`C:\ProgramData\VHC\veeam-vhc-aws-state.json`), and logs are stored separately and are never touched by an upgrade.
 
 #### Config changes in recent releases
 
@@ -510,6 +499,7 @@ rm -f ./veeam-vhc-aws.yaml ./veeam-vhc-aws.log ./veeam-vhc-aws-state.json
 #### Docker
 
 ```bash
+docker stop veeam-vhc-aws && docker rm veeam-vhc-aws
 docker rmi veeam-vhc-aws
 ```
 
