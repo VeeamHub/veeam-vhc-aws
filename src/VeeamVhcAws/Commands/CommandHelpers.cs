@@ -30,7 +30,7 @@ public static class CommandHelpers
         var patternEngine = BuildPatternEngine(config);
         var handlers = OutputHandlerFactory.CreateHandlers(config);
         var dispatcher = new OutputDispatcher(handlers);
-        var stateFile = config.GetSection("global").Get("state_file", "./veeam-vhc-aws-state.json");
+        var stateFile = Path.GetFullPath(config.GetSection("global").Get("state_file", "./veeam-vhc-aws-state.json"));
         var configSuppressions = config.GetListOfStrings("suppressions");
         var state = new FindingState(stateFile, configSuppressions);
 

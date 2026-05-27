@@ -32,7 +32,7 @@ public class StateService
             ? ConfigLoader.LoadConfig(options.ConfigPath)
             : new Dictionary<string, object>();
         var global = cfg.GetSection("global");
-        _statePath = global.Get("state_file", "./veeam-vhc-aws-state.json");
+        _statePath = Path.GetFullPath(global.Get("state_file", "./veeam-vhc-aws-state.json"));
     }
 
     public string StateFilePath => _statePath;
