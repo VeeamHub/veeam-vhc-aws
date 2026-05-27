@@ -49,6 +49,16 @@ veeam-vhc-aws ui
 
 **Prefer YAML?** Run `veeam-vhc-aws setup` for the interactive terminal wizard, or edit `C:\Program Files\VHC\veeam-vhc-aws.yaml` directly.
 
+**No web console / headless?** Skip the UI entirely — the scheduled task runs `veeam-vhc-aws all` in the background and sends alerts to your configured outputs (webhook, email, Prometheus, etc.). The web UI is optional and purely an operator console; it has no effect on alerting.
+
+```powershell
+# Run all monitors once, send alerts, exit
+veeam-vhc-aws all -c "C:\Program Files\VHC\veeam-vhc-aws.yaml"
+
+# Same, but suppress all terminal output (for scripts or CI)
+veeam-vhc-aws all -c config.yaml --no-interactive
+```
+
 ## Features
 
 - **Multi-Server** -- Monitor multiple VBR and VBAWS servers from a single config with dynamic parallelism
@@ -294,14 +304,19 @@ See [`config/example.yaml`](config/example.yaml) for the full configuration refe
 
 #### Performance Tuning
 
-For environments with busy VBR servers or large session volumes, these global settings control API pagination behavior:
+For environments with busy VBR servers or large session volumes, these global settings control API pagination and timeout behavior:
 
 ```yaml
 global:
-  timeout_seconds: 30       # Per-request timeout (default: 30). Avoid values >60 on slow APIs.
-  page_size: 500            # Items per API page (default: 500, was 50 in older versions)
-  max_pages: 100            # Circuit breaker: max pages before stopping (default: 100)
+  timeout_seconds: 30           # Per-request HTTP timeout (default: 30). Avoid values >60 on slow APIs.
+  session_timeout_seconds: 600  # Timeout for /api/v1/sessions calls specifically (default: 600).
+                                # Raise to 1200+ for very large deployments (20k+ sessions).
+  page_size: 500                # Items per API page (default: 500, was 50 in older versions)
+  max_pages: 100                # Circuit breaker: max pages before stopping (default: 100)
 ```
+
+> [!TIP]
+> If your VBR server has a large number of sessions and monitor runs are timing out, increase `session_timeout_seconds` first (e.g. `1200` for 20 minutes). The general `timeout_seconds` applies to all other API calls.
 
 **Adaptive lookback** is enabled automatically. After each successful monitor run, the session lookback window narrows from the configured max (e.g. 24h) down to just the time since the last success + a 2-minute overlap buffer. This means a monitor running every 5 minutes only fetches ~5 minutes of sessions instead of 24 hours, reducing API load by orders of magnitude. The overlap buffer is configurable per monitor:
 
@@ -446,19 +461,28 @@ To upgrade without re-running the full setup wizard — your config, state, and 
 ```
 
 That's it. The wizard will:
-- Swap in the new executable
-- Scan your config for any features added since your last install and offer to configure them (e.g., if you're missing `daily_summary`, it will ask if you'd like to set it up)
+- Stop the scheduled task, swap in the new executable, and restart it
+- Scan your existing config for any keys added since your last install and offer to configure them (e.g., if you're missing `session_timeout_seconds`, it will prompt you)
 
 #### Manual alternative
 
 If you prefer, just copy the new `veeam-vhc-aws.exe` over the existing one:
 
 ```powershell
+# Stop the scheduled task first to avoid replacing a running binary
+Stop-ScheduledTask -TaskName "Veeam VHC AWS"
 Copy-Item .\veeam-vhc-aws.exe "$env:ProgramFiles\VHC\veeam-vhc-aws.exe" -Force
+Start-ScheduledTask -TaskName "Veeam VHC AWS"
 ```
 
 > [!NOTE]
 > Your config (`C:\ProgramData\VHC\veeam-vhc-aws.yaml`), alert state (`veeam-vhc-aws-state.json`), and logs are stored separately and are never touched by an upgrade.
+
+#### Config changes in recent releases
+
+| Version | New config key | Default | Notes |
+|---------|---------------|---------|-------|
+| v1.0.0.44+ | `global.session_timeout_seconds` | `600` | Timeout for `/api/v1/sessions` calls. Configurable via the web UI Settings page or YAML. |
 
 ---
 
