@@ -157,15 +157,6 @@ public class WorkerHealthMonitor : IMonitor
             var failed = failedSessions.Count;
             var failureRate = total > 0 ? (double)failed / total : 0.0;
 
-            if (failureRate > criticalRate || failureRate > warningRate)
-            {
-                var severity = failureRate > criticalRate ? Severity.Critical : Severity.Warning;
-                var label = failureRate > criticalRate ? "High" : "Elevated";
-                findings.Add(new Finding(severity, $"session-type:{sessionType}",
-                    $"{label} {sessionType} failure rate: {failureRate:P0} ({failed}/{total})",
-                    new Dictionary<string, object> { ["total"] = total, ["failed"] = failed, ["rate"] = failureRate }));
-            }
-
             // Per-policy latest-only
             var byPolicy = new Dictionary<string, List<Dictionary<string, object>>>();
             foreach (var s in typeSessions)
