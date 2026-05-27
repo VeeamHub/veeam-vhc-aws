@@ -9,6 +9,17 @@
     <button class="btn" @onclick="AddServer">+ Add Server</button>
 </div>
 
+@if (_cfg is not null)
+{
+    <p class="muted" style="margin-bottom:1rem">
+        Config: <code>@_cfg.ConfigPath</code>
+        @if (!_cfg.ConfigExists)
+        {
+            <span style="color:var(--color-warn);margin-left:.5rem">⚠ file not found — changes will create it</span>
+        }
+    </p>
+}
+
 @if (_cfg is null)
 {
     <p>Loading…</p>

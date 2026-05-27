@@ -89,14 +89,15 @@ public static class ConfigLoader
 
     public static string GetConfigPath(string? configArg = null)
     {
+        string raw;
         if (!string.IsNullOrEmpty(configArg))
-            return configArg;
+            raw = configArg;
+        else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("VEEAM_VHC_AWS_CONFIG")))
+            raw = Environment.GetEnvironmentVariable("VEEAM_VHC_AWS_CONFIG")!;
+        else
+            raw = "./veeam-vhc-aws.yaml";
 
-        var envPath = Environment.GetEnvironmentVariable("VEEAM_VHC_AWS_CONFIG");
-        if (!string.IsNullOrEmpty(envPath))
-            return envPath;
-
-        return "./veeam-vhc-aws.yaml";
+        return Path.GetFullPath(raw);
     }
 
     public static Dictionary<string, object> LoadConfig(string path)
