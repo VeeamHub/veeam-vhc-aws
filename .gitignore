@@ -49,6 +49,8 @@ veeam-vhc-aws-test.yaml
 # Plans and AI
 Plans/*
 CLAUDE.md
+.claude/worktrees/
+.claude/settings.local.json
 
 # Added by ggshield
 .cache_ggshield
