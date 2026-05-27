@@ -376,6 +376,18 @@ if ($Upgrade) {
             }
         }
 
+        # ---- Feature: session_timeout_seconds ----
+        if ($configText -match '(?m)^global:' -and $configText -notmatch 'session_timeout_seconds') {
+            $configText = Insert-ConfigBlock $configText "global" "  session_timeout_seconds: 600  # /api/v1/sessions timeout; raise for large deployments (e.g. 1200)"
+            Save-Config $configText
+            Write-Host "  session_timeout_seconds: added (default 600s)" -ForegroundColor DarkGray
+            $anyUpdates = $true
+        } else {
+            if ($configText -match 'session_timeout_seconds') {
+                Write-Host "  session_timeout_seconds: already configured" -ForegroundColor DarkGray
+            }
+        }
+
         # ---- Feature: timeout_seconds check (recommend 30 if >60) ----
         if ($configText -match '(?m)timeout_seconds:\s*(\d+)') {
             $currentTimeout = [int]$Matches[1]

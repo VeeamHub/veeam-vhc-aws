@@ -40,13 +40,14 @@ public class ConfigLoaderTests
     [Fact]
     public void GetConfigPathFallsToDefault()
     {
-        // With no arg and no env var, should return default
+        // With no arg and no env var, should return an absolute path ending in veeam-vhc-aws.yaml
         var original = Environment.GetEnvironmentVariable("VEEAM_VHC_AWS_CONFIG");
         try
         {
             Environment.SetEnvironmentVariable("VEEAM_VHC_AWS_CONFIG", null);
             var result = ConfigLoader.GetConfigPath(null);
-            Assert.Equal("./veeam-vhc-aws.yaml", result);
+            Assert.True(Path.IsPathRooted(result), "default path should be absolute");
+            Assert.Equal("veeam-vhc-aws.yaml", Path.GetFileName(result));
         }
         finally
         {

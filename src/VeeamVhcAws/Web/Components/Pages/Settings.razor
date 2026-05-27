@@ -73,6 +73,10 @@ else
             <label>Max pages (circuit breaker)</label>
             <input type="number" min="1" max="10000" @bind="_maxPages" />
         </div>
+        <div class="form-row">
+            <label>Session timeout — /api/v1/sessions (seconds) <span class="muted">raise for very large deployments</span></label>
+            <input type="number" min="30" max="3600" @bind="_sessionTimeoutSeconds" />
+        </div>
     </section>
 
     <section class="form-section">
@@ -86,6 +90,14 @@ else
     <div class="form-actions">
         <button class="btn" @onclick="SaveAll">Save Settings</button>
     </div>
+
+    @if (_unmappedGlobal.Count > 0)
+    {
+        <section class="form-section">
+            <h2>Other global config keys <span class="muted">(not yet in the form — edit YAML directly)</span></h2>
+            <ConfigDump Section="@_unmappedGlobal" />
+        </section>
+    }
 }
 
 @if (!string.IsNullOrEmpty(_flash))
@@ -94,8 +106,20 @@ else
 }
 
 @code {
+    private static readonly HashSet<string> _mappedGlobalKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "timeout_seconds",
+        "session_timeout_seconds",
+        "retry_count",
+        "retry_delay_seconds",
+        "page_size",
+        "max_pages",
+        "logging",
+    };
+
     private ConfigSnapshot? _cfg;
     private string? _flash;
+    private Dictionary<string, object> _unmappedGlobal = new();
 
     // Logging
     private string _logLevel = "DEBUG";
@@ -106,6 +130,7 @@ else
 
     // HTTP
     private int _timeoutSeconds = 30;
+    private int _sessionTimeoutSeconds = 600;
     private int _retryCount = 2;
     private int _retryDelay = 5;
     private int _pageSize = 500;
@@ -132,12 +157,17 @@ else
         _diskWarnPct = ToInt(logging.GetValueOrDefault("disk_warning_pct"), 20);
 
         _timeoutSeconds = ToInt(_cfg.Global.GetValueOrDefault("timeout_seconds"), 30);
+        _sessionTimeoutSeconds = ToInt(_cfg.Global.GetValueOrDefault("session_timeout_seconds"), 600);
         _retryCount = ToInt(_cfg.Global.GetValueOrDefault("retry_count"), 2);
         _retryDelay = ToInt(_cfg.Global.GetValueOrDefault("retry_delay_seconds"), 5);
         _pageSize = ToInt(_cfg.Global.GetValueOrDefault("page_size"), 500);
         _maxPages = ToInt(_cfg.Global.GetValueOrDefault("max_pages"), 100);
 
         _dailySummaryEnabled = ToBool(_cfg.DailySummary.GetValueOrDefault("enabled"), false);
+
+        _unmappedGlobal = _cfg.Global
+            .Where(kv => !_mappedGlobalKeys.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
     }
 
     private void SaveAll()
@@ -147,6 +177,7 @@ else
         var global = new Dictionary<string, object>(_cfg.Global)
         {
             ["timeout_seconds"] = _timeoutSeconds,
+            ["session_timeout_seconds"] = _sessionTimeoutSeconds,
             ["retry_count"] = _retryCount,
             ["retry_delay_seconds"] = _retryDelay,
             ["page_size"] = _pageSize,
@@ -170,6 +201,7 @@ else
 
         _flash = "Settings saved";
         _cfg = Config.Load();
+        Load();
     }
 
     private static int ToInt(object? v, int dflt) => v switch

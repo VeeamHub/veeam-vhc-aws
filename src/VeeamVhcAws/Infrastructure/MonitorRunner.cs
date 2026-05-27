@@ -122,6 +122,14 @@ public static class MonitorRunner
                     findingState.SetLastSuccessTime(serverCtx.Name, name, DateTime.UtcNow);
                     Logger.Debug("Recorded last success time for {Monitor} on '{Server}'", name, serverCtx.Name);
                 }
+
+                // If every non-metric finding is a connection error, the server is unreachable —
+                // skip remaining monitors rather than letting each one independently time out.
+                if (IsServerUnreachable(result, serverCtx.Name))
+                {
+                    Logger.Warning("Server '{Server}' appears unreachable — skipping remaining monitors", serverCtx.Name);
+                    break;
+                }
             }
             catch (Exception e)
             {
@@ -148,6 +156,10 @@ public static class MonitorRunner
                     Status = MonitorProgressStatus.Failed,
                     Result = errorResult,
                 });
+
+                // Hard exception = definitely unreachable; skip remaining monitors.
+                Logger.Warning("Server '{Server}' unreachable — skipping remaining monitors", serverCtx.Name);
+                break;
             }
         }
         return results;
@@ -177,6 +189,21 @@ public static class MonitorRunner
         }
 
         return applicable;
+    }
+
+    // Returns true when every non-metric, non-Ok finding is a connection error, meaning
+    // no real data was returned and retrying subsequent monitors would only waste time.
+    private static bool IsServerUnreachable(MonitorResult result, string serverName)
+    {
+        if (result.Errors.Count == 0)
+            return false;
+
+        var actionableFindings = result.Findings
+            .Where(f => f.MetricName == null && f.Severity != Severity.Ok)
+            .ToList();
+
+        return actionableFindings.Count > 0
+            && actionableFindings.All(f => f.Resource == $"[{serverName}] connection");
     }
 
     private static void PrefixFindings(MonitorResult result, string serverName)

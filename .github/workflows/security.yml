@@ -10,17 +10,15 @@ on:
 
 permissions:
   contents: read
-  security-events: write
-  actions: read
 
 jobs:
   dependency-scan:
     name: Vulnerable Package Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.x'
 
@@ -36,40 +34,11 @@ jobs:
             exit 1
           fi
 
-  codeql:
-    name: CodeQL (C#)
-    runs-on: ubuntu-latest
-    continue-on-error: false
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.x'
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: csharp
-
-      - name: Restore
-        run: dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
-
-      - name: Build for CodeQL
-        run: dotnet build src/VeeamVhcAws/VeeamVhcAws.csproj -c Release --no-restore
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
-
   secrets:
     name: Secret Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

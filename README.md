@@ -24,9 +24,7 @@
 ---
 
 > [!NOTE]
-> Veeam VHC AWS is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, Veeam VHC AWS runs continuously and alerts you the moment something goes wrong.
-
-> This is a community-supported tool and is not an officially supported Veeam product.
+> Veeam VHC AWS is part of the [Veeam Health Check](https://github.com/VeeamHub/veeam-healthcheck) ecosystem — a community-supported suite of tools from [VeeamHub](https://github.com/VeeamHub) for assessing and monitoring Veeam backup infrastructure health. Where Veeam Health Check gives you a point-in-time report, Veeam VHC AWS runs continuously and alerts you the moment something goes wrong. **This is not an officially supported Veeam product.**
 
 ## ⚡ Quickstart (60 seconds)
 
@@ -48,6 +46,16 @@ veeam-vhc-aws ui
 **Already installed?** Just run `veeam-vhc-aws ui` and open <http://127.0.0.1:9101>.
 
 **Prefer YAML?** Run `veeam-vhc-aws setup` for the interactive terminal wizard, or edit `C:\Program Files\VHC\veeam-vhc-aws.yaml` directly.
+
+**No web console / headless?** Skip the UI entirely — the scheduled task runs `veeam-vhc-aws all` in the background and sends alerts to your configured outputs (webhook, email, Prometheus, etc.). The web UI is optional and purely an operator console; it has no effect on alerting.
+
+```powershell
+# Run all monitors once, send alerts, exit
+veeam-vhc-aws all -c "C:\Program Files\VHC\veeam-vhc-aws.yaml"
+
+# Same, but suppress all terminal output (for scripts or CI)
+veeam-vhc-aws all -c config.yaml --no-interactive
+```
 
 ## Features
 
@@ -97,7 +105,9 @@ dotnet run --project src/VeeamVhcAws -- all -c veeam-vhc-aws.yaml   # Run all mo
 
 ```bash
 docker build -t veeam-vhc-aws .
-docker run -v /path/to/config.yaml:/config/config.yaml veeam-vhc-aws
+docker run -v /path/to/config.yaml:/config/veeam-vhc-aws.yaml \
+  -e VEEAM_VHC_AWS_CONFIG=/config/veeam-vhc-aws.yaml \
+  veeam-vhc-aws
 ```
 
 > The Docker image is built with the .NET 10 SDK and runs as a self-contained binary on a minimal `runtime-deps` base image.
@@ -148,17 +158,6 @@ veeam-vhc-aws all -c config.yaml --no-interactive
 ```
 
 ### Web Admin GUI
-
-<p align="center">
-  <img src="docs/images/web-admin-ui.png" alt="Veeam VHC AWS web admin UI — Dashboard and Alerts pages" width="800">
-</p>
-
-<!--
-  To replace the screenshot:
-  1. Take a PNG capture of the Dashboard (1200-1600px wide is ideal).
-  2. Optionally include a second composited shot of the Alerts page.
-  3. Save as docs/images/web-admin-ui.png in this repo.
--->
 
 The `ui` command launches a browser-based admin dashboard — embedded ASP.NET Core + Blazor Server hosted by the same `veeam-vhc-aws.exe`. No separate install or web server required.
 
@@ -236,7 +235,7 @@ veeam-vhc-aws tracks finding state between runs so you only get notified when so
 
 State is stored in `veeam-vhc-aws-state.json` (default: `C:\ProgramData\VHC\veeam-vhc-aws-state.json` on Windows). Deleting this file resets all state — every existing finding will re-alert on the next run.
 
-To enable deduplication on webhook handlers, add `deduplicate: true` to the handler config:
+Deduplication is **on by default** for all output handlers. To disable it for a specific handler (e.g., to always send every alert regardless of state), add `deduplicate: false`:
 
 ```yaml
 output:
@@ -244,7 +243,7 @@ output:
     url: https://ntfy.sh/my-veeam-alerts
     template: ntfy
     min_severity: warning
-    deduplicate: true
+    deduplicate: false   # send on every run, even if finding already active
 ```
 
 ### Daily Summary
@@ -256,7 +255,7 @@ Veeam VHC AWS can send a daily health digest showing the complete status of all 
 **Run on demand:**
 
 ```powershell
-.\veeam-vhc-aws.exe summary -c C:\ProgramData\VHC\veeam-vhc-aws.yaml
+.\veeam-vhc-aws.exe summary -c "$env:ProgramFiles\VHC\veeam-vhc-aws.yaml"
 ```
 
 **Config options:**
@@ -287,21 +286,26 @@ The worst severity across all findings determines the exit code, making it CI/CD
 
 Config file resolution order:
 1. `-c` / `--config` CLI argument
-2. `VHC_MONITOR_CONFIG` environment variable
+2. `VEEAM_VHC_AWS_CONFIG` environment variable
 3. `./veeam-vhc-aws.yaml` in the current directory
 
 See [`config/example.yaml`](config/example.yaml) for the full configuration reference including server setup, thresholds, output handlers, and error patterns.
 
 #### Performance Tuning
 
-For environments with busy VBR servers or large session volumes, these global settings control API pagination behavior:
+For environments with busy VBR servers or large session volumes, these global settings control API pagination and timeout behavior:
 
 ```yaml
 global:
-  timeout_seconds: 30       # Per-request timeout (default: 30). Avoid values >60 on slow APIs.
-  page_size: 500            # Items per API page (default: 500, was 50 in older versions)
-  max_pages: 100            # Circuit breaker: max pages before stopping (default: 100)
+  timeout_seconds: 30           # Per-request HTTP timeout (default: 30). Avoid values >60 on slow APIs.
+  session_timeout_seconds: 600  # Timeout for /api/v1/sessions calls specifically (default: 600).
+                                # Raise to 1200+ for very large deployments (20k+ sessions).
+  page_size: 500                # Items per API page (default: 500, was 50 in older versions)
+  max_pages: 100                # Circuit breaker: max pages before stopping (default: 100)
 ```
+
+> [!TIP]
+> If your VBR server has a large number of sessions and monitor runs are timing out, increase `session_timeout_seconds` first (e.g. `1200` for 20 minutes). The general `timeout_seconds` applies to all other API calls.
 
 **Adaptive lookback** is enabled automatically. After each successful monitor run, the session lookback window narrows from the configured max (e.g. 24h) down to just the time since the last success + a 2-minute overlap buffer. This means a monitor running every 5 minutes only fetches ~5 minutes of sessions instead of 24 hours, reducing API load by orders of magnitude. The overlap buffer is configurable per monitor:
 
@@ -343,7 +347,7 @@ servers:
 > ```
 > Double-quoted values (`"..."`) process backslash sequences — `\n` becomes a newline, `\t` a tab, etc. Single-quoted values are always literal. If you do use double quotes, escape every backslash: `"DOMAIN\\backupadmin"`.
 
-- **Dynamic parallelism:** 2 or fewer servers run sequentially. 3+ run in parallel (up to 20 workers).
+- **Dynamic parallelism:** 2 or fewer servers run sequentially. 3+ run fully in parallel.
 - **Failure isolation:** If one server is unreachable, the others continue normally.
 - **Server prefixing:** All findings include the server name (e.g., `[prod-vbr] repo:Backup Copy Repo`).
 
@@ -394,7 +398,7 @@ output:
 
 ### Logging
 
-Log files rotate daily and are stored alongside the config by default. Key options:
+Log files rotate daily. On Windows standalone installs, logs are written to `C:\ProgramData\VHC\logs\`. Key options:
 
 ```yaml
 global:
@@ -433,7 +437,7 @@ Logs are small in normal operation. The table below shows estimates for a repres
 
 ### Upgrading
 
-To upgrade without re-running the full setup wizard — your config, state, and logs in `C:\ProgramData\VHC\` are untouched.
+To upgrade without re-running the full setup wizard — your config (`C:\Program Files\VHC\`), state, and logs (`C:\ProgramData\VHC\`) are untouched.
 
 #### Windows Standalone (Recommended)
 
@@ -446,19 +450,28 @@ To upgrade without re-running the full setup wizard — your config, state, and 
 ```
 
 That's it. The wizard will:
-- Swap in the new executable
-- Scan your config for any features added since your last install and offer to configure them (e.g., if you're missing `daily_summary`, it will ask if you'd like to set it up)
+- Stop the scheduled task, swap in the new executable, and restart it
+- Scan your existing config for any keys added since your last install and offer to configure them (e.g., if you're missing `session_timeout_seconds`, it will prompt you)
 
 #### Manual alternative
 
 If you prefer, just copy the new `veeam-vhc-aws.exe` over the existing one:
 
 ```powershell
+# Stop the scheduled task first to avoid replacing a running binary
+Stop-ScheduledTask -TaskName "Veeam VHC AWS"
 Copy-Item .\veeam-vhc-aws.exe "$env:ProgramFiles\VHC\veeam-vhc-aws.exe" -Force
+Start-ScheduledTask -TaskName "Veeam VHC AWS"
 ```
 
 > [!NOTE]
-> Your config (`C:\ProgramData\VHC\veeam-vhc-aws.yaml`), alert state (`veeam-vhc-aws-state.json`), and logs are stored separately and are never touched by an upgrade.
+> Your config (`C:\Program Files\VHC\veeam-vhc-aws.yaml`), alert state (`C:\ProgramData\VHC\veeam-vhc-aws-state.json`), and logs are stored separately and are never touched by an upgrade.
+
+#### Config changes in recent releases
+
+| Version | New config key | Default | Notes |
+|---------|---------------|---------|-------|
+| v1.0.0.44+ | `global.session_timeout_seconds` | `600` | Timeout for `/api/v1/sessions` calls. Configurable via the web UI Settings page or YAML. |
 
 ---
 
@@ -486,6 +499,7 @@ rm -f ./veeam-vhc-aws.yaml ./veeam-vhc-aws.log ./veeam-vhc-aws-state.json
 #### Docker
 
 ```bash
+docker stop veeam-vhc-aws && docker rm veeam-vhc-aws
 docker rmi veeam-vhc-aws
 ```
 

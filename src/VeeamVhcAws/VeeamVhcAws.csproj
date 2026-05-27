@@ -13,9 +13,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
-    <!-- Publish-time settings (apply to all dotnet publish invocations) -->
-    <PublishSingleFile>true</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
+    <StaticWebAssetsEnabled>true</StaticWebAssetsEnabled>
     <!-- Suppress IL trim warnings: reflection intentionally re-enabled via JsonSerializerIsReflectionEnabledByDefault -->
     <NoWarn>$(NoWarn);IL2026;IL3000;IL2104</NoWarn>
   </PropertyGroup>
@@ -24,6 +22,9 @@
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
     <DebugSymbols>false</DebugSymbols>
     <DebugType>none</DebugType>
+    <!-- Publish-time settings (Release only — debug runs should not be trimmed) -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
 
   <PropertyGroup>

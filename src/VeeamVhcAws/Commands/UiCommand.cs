@@ -33,6 +33,11 @@ public static class UiCommand
                 var cfg = ConfigLoader.LoadConfig(configPath);
                 LoggingSetup.Setup(cfg);
             }
+            else if (TerminalCapabilities.IsInteractive)
+            {
+                AnsiConsole.MarkupLine($"[yellow]⚠ Config not found:[/] [grey]{configPath.EscapeMarkup()}[/]");
+                AnsiConsole.MarkupLine($"[grey]  Servers page will be empty — add servers via the UI to create it.[/]");
+            }
 
             var tokenPath = GetTokenPath();
             if (regenToken)
@@ -72,7 +77,7 @@ public static class UiCommand
             }
             else
             {
-                Console.WriteLine($"Veeam VHC AWS Admin UI: {displayUrl}");
+                Console.WriteLine($"Veeam VHC AWS Admin UI: {displayUrl} | Config: {configPath}");
             }
 
             if (!noBrowser && TerminalCapabilities.IsInteractive)
