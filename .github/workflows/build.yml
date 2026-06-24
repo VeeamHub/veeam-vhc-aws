@@ -46,12 +46,15 @@ jobs:
             -o dist/win-x64 \
             --nologo
 
-      - name: Verify single-file output
+      - name: Verify publish output (exe + admin UI assets)
         run: |
           ls -lh dist/win-x64/
           test -f dist/win-x64/veeam-vhc-aws.exe || (echo "ERROR: veeam-vhc-aws.exe not found" && exit 1)
-          COUNT=$(ls dist/win-x64/ | wc -l)
-          echo "Output file count: $COUNT"
+          # The Blazor admin UI (`ui` command) serves static assets from wwwroot/.
+          # Fail early if they are missing so a broken GUI never reaches a release.
+          test -f dist/win-x64/wwwroot/_framework/blazor.web.js || \
+            (echo "ERROR: wwwroot/_framework/blazor.web.js missing — admin GUI would 404" && exit 1)
+          echo "OK: exe + wwwroot/_framework/blazor.web.js present"
 
       - name: VirusTotal Scan
         if: env.VT_API_KEY != ''
@@ -94,4 +97,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: veeam-vhc-aws-win-x64
-          path: dist/win-x64/veeam-vhc-aws.exe
+          # Include wwwroot\ so the artifact's `ui` GUI actually works when run.
+          path: dist/win-x64/

@@ -21,7 +21,19 @@ public static class WebHost
 
     public static async Task RunAsync(WebHostOptions options, AuthOptions auth, CancellationToken cancellationToken)
     {
-        var builder = WebApplication.CreateBuilder();
+        // Resolve the web root next to the exe rather than the current working directory.
+        // The `ui` command is launched from arbitrary directories (e.g. a Downloads folder),
+        // and the default content root is the CWD — so without this, UseStaticFiles() would
+        // 404 on _framework/blazor.web.js and css/app.css unless the user happened to run
+        // from the install dir. Published builds ship wwwroot\ beside the exe; when that
+        // physical folder is present we anchor ContentRoot/WebRoot to it. In dev (`dotnet run`)
+        // there is no physical wwwroot\_framework, so we fall back to defaults + the dev
+        // static-web-assets manifest handled by ServeBlazorFrameworkFiles below.
+        var publishedWebRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot", "_framework");
+        var builderOptions = Directory.Exists(publishedWebRoot)
+            ? new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory, WebRootPath = "wwwroot" }
+            : new WebApplicationOptions();
+        var builder = WebApplication.CreateBuilder(builderOptions);
 
         builder.WebHost.UseUrls($"http://{options.BindAddress}:{options.Port}");
         builder.Logging.ClearProviders();
