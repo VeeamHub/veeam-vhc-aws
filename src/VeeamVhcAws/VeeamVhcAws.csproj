@@ -24,7 +24,12 @@
     <DebugType>none</DebugType>
     <!-- Publish-time settings (Release only — debug runs should not be trimmed) -->
     <PublishSingleFile>true</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
+    <!-- IL trimming is intentionally DISABLED. The Blazor admin UI discovers its
+         routable page components via reflection (Routes.razor <Router AppAssembly=...>),
+         so the trimmer strips the @page components and the "/" endpoint never registers
+         (root page returns 404 while minimal-API endpoints survive). Trimming a Blazor
+         Web App is unsupported; keep it off so the GUI routes correctly. -->
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
   <PropertyGroup>

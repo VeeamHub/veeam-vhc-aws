@@ -101,6 +101,12 @@ if ($Uninstall) {
         Write-Host "  -> Removed $exePath" -ForegroundColor Green
     }
 
+    $wwwPath = Join-Path $InstallDir "wwwroot"
+    if (Test-Path $wwwPath) {
+        Remove-Item $wwwPath -Recurse -Force
+        Write-Host "  -> Removed $wwwPath" -ForegroundColor Green
+    }
+
     $dataDir = Join-Path $env:ProgramData "VHC"
     Write-Host ""
     Write-Host "  Config and data are preserved at:" -ForegroundColor Yellow
@@ -159,6 +165,15 @@ if ($Upgrade) {
     Copy-Item $exeSource $exeDest -Force
     $newVersion = & $exeDest version 2>&1
     Write-Host "  -> $newVersion" -ForegroundColor Green
+
+    # Refresh the Blazor admin UI assets (wwwroot) so the `ui` GUI matches the new exe.
+    $wwwSource = Join-Path (Split-Path -Parent $exeSource) "wwwroot"
+    if (Test-Path $wwwSource) {
+        $wwwDest = Join-Path $InstallDir "wwwroot"
+        if (Test-Path $wwwDest) { Remove-Item $wwwDest -Recurse -Force }
+        Copy-Item $wwwSource $wwwDest -Recurse -Force
+        Write-Host "  -> Refreshed admin UI assets at $wwwDest" -ForegroundColor Green
+    }
 
     # --- Feature gap detection ---
     # HOW TO ADD A NEW FEATURE CHECK:
@@ -476,6 +491,19 @@ if (-not (Test-Path $InstallDir)) {
 }
 Copy-Item $exeSource (Join-Path $InstallDir "veeam-vhc-aws.exe") -Force
 Write-Host "  -> Copied to $InstallDir\veeam-vhc-aws.exe" -ForegroundColor Green
+
+# Copy the Blazor admin UI static assets (wwwroot) next to the exe. The `ui` command
+# serves these from <install dir>\wwwroot; without them the GUI 404s on blazor.web.js.
+# (The scheduled monitoring tasks do not need wwwroot -- only the `ui` command does.)
+$wwwSource = Join-Path (Split-Path -Parent $exeSource) "wwwroot"
+if (Test-Path $wwwSource) {
+    $wwwDest = Join-Path $InstallDir "wwwroot"
+    if (Test-Path $wwwDest) { Remove-Item $wwwDest -Recurse -Force }
+    Copy-Item $wwwSource $wwwDest -Recurse -Force
+    Write-Host "  -> Copied admin UI assets to $wwwDest" -ForegroundColor Green
+} else {
+    Write-Host "  -> NOTE: wwwroot not found next to exe; the 'ui' GUI will not work until it is present." -ForegroundColor Yellow
+}
 
 # Add Defender exclusion for the installed exe so SmartScreen / Smart App Control
 # won't block an unsigned binary that has no ISG cloud reputation yet.

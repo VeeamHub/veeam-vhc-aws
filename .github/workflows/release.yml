@@ -110,17 +110,23 @@ jobs:
             Write-Host "::warning::Signature status is $($sig.Status) — expected Valid"
           }
 
-      - name: Verify single-file output
+      - name: Verify publish output (exe + admin UI assets)
         shell: pwsh
         run: |
           Get-ChildItem dist/win-x64/ | Format-Table Name, Length -AutoSize
           if (-not (Test-Path dist/win-x64/veeam-vhc-aws.exe)) {
             throw "veeam-vhc-aws.exe not found in publish output"
           }
-          $count = (Get-ChildItem dist/win-x64/).Count
-          Write-Host "Output file count: $count (expected: 1)"
-          if ($count -ne 1) {
-            Write-Host "::warning::More than 1 file in publish output"
+          # The Blazor admin UI (`ui` command) serves static assets from wwwroot\.
+          # Without these the GUI 404s on blazor.web.js, so fail the release if absent.
+          if (-not (Test-Path dist/win-x64/wwwroot/_framework/blazor.web.js)) {
+            throw "wwwroot/_framework/blazor.web.js missing — the admin GUI would 404. Check PublishTrimmed/StaticWebAssetsEnabled."
+          }
+          Write-Host "OK: exe + wwwroot/_framework/blazor.web.js present"
+          # Only the exe should be a loose file; everything else lives under wwwroot\.
+          $stray = Get-ChildItem dist/win-x64/ -File | Where-Object { $_.Name -ne 'veeam-vhc-aws.exe' }
+          if ($stray) {
+            Write-Host "::warning::Unexpected loose files in publish output: $($stray.Name -join ', ')"
           }
 
       - name: Bundle release zip
@@ -128,6 +134,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release-bundle | Out-Null
           Copy-Item dist/win-x64/veeam-vhc-aws.exe release-bundle/
+          Copy-Item dist/win-x64/wwwroot release-bundle/ -Recurse   # admin UI static assets (required by `ui`)
           Copy-Item setup.ps1 release-bundle/
           Copy-Item config/example.yaml release-bundle/
           @"
@@ -147,9 +154,13 @@ jobs:
           .\veeam-vhc-aws.exe setup                        Interactive config wizard
           .\veeam-vhc-aws.exe all -c veeam-vhc-aws.yaml      Run all monitors
           .\veeam-vhc-aws.exe summary -c veeam-vhc-aws.yaml  Daily summary
+          .\veeam-vhc-aws.exe ui -c veeam-vhc-aws.yaml       Launch the web admin GUI
           .\veeam-vhc-aws.exe test-connection -c config    Test server connectivity
           .\veeam-vhc-aws.exe serve -c config -p 9100      Prometheus metrics server
           .\veeam-vhc-aws.exe --help                       Show all commands
+
+          Note: keep the wwwroot\ folder next to veeam-vhc-aws.exe -- the `ui`
+          command serves the admin GUI from it. setup.ps1 copies it for you.
 
           Docs: https://github.com/VeeamHub/veeam-vhc-aws
           "@ | Set-Content release-bundle/README.txt
@@ -179,18 +190,45 @@ jobs:
         env:
           VT_API_KEY: ${{ secrets.VT_API_KEY }}
         run: |
-          $hash = (Get-FileHash dist/win-x64/veeam-vhc-aws.exe -Algorithm SHA256).Hash.ToLower()
+          $exe = "dist/win-x64/veeam-vhc-aws.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           $vtUrl = "https://www.virustotal.com/gui/file/$hash"
           "vt_url=$vtUrl" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "VT report URL: $vtUrl"
 
-          # Upload file (curl.exe is available on windows-latest via Git for Windows)
-          $uploadJson = curl.exe -s --request POST `
-            --url "https://www.virustotal.com/api/v3/files" `
-            --header "x-apikey: $env:VT_API_KEY" `
-            --form "file=@dist/win-x64/veeam-vhc-aws.exe"
-          $upload = $uploadJson | ConvertFrom-Json
-          $analysisId = $upload.data.id
+          # VirusTotal caps direct /files uploads at 32 MB. The self-contained,
+          # untrimmed win-x64 build is larger, so request a one-time upload URL
+          # for big files. JSON parsing is defensive: an API error must warn and
+          # let the release proceed, not throw. (curl.exe ships via Git for Windows.)
+          $size = (Get-Item $exe).Length
+          Write-Host "Artifact size: $size bytes"
+
+          if ($size -gt 33554432) {
+            Write-Host "File > 32 MB — requesting large-file upload URL"
+            $urlJson = curl.exe -s --request GET `
+              --url "https://www.virustotal.com/api/v3/files/upload_url" `
+              --header "x-apikey: $env:VT_API_KEY"
+            try { $uploadUrl = ($urlJson | ConvertFrom-Json).data } catch { $uploadUrl = $null }
+            if (-not $uploadUrl) {
+              Write-Host "::warning::Could not obtain VirusTotal upload URL — skipping scan. Report: $vtUrl"
+              exit 0
+            }
+            $uploadJson = curl.exe -s --request POST `
+              --url "$uploadUrl" `
+              --header "x-apikey: $env:VT_API_KEY" `
+              --form "file=@$exe"
+          } else {
+            $uploadJson = curl.exe -s --request POST `
+              --url "https://www.virustotal.com/api/v3/files" `
+              --header "x-apikey: $env:VT_API_KEY" `
+              --form "file=@$exe"
+          }
+
+          try { $analysisId = ($uploadJson | ConvertFrom-Json).data.id } catch { $analysisId = $null }
+          if (-not $analysisId) {
+            Write-Host "::warning::VirusTotal upload returned no analysis id (API error or rate limit) — skipping scan. Report: $vtUrl"
+            exit 0
+          }
           Write-Host "Analysis ID: $analysisId"
 
           # Poll for results
@@ -199,7 +237,7 @@ jobs:
             $resultJson = curl.exe -s --request GET `
               --url "https://www.virustotal.com/api/v3/analyses/$analysisId" `
               --header "x-apikey: $env:VT_API_KEY"
-            $result = $resultJson | ConvertFrom-Json
+            try { $result = $resultJson | ConvertFrom-Json } catch { $result = $null }
             $status = $result.data.attributes.status
             Write-Host "[$i/20] Status: $status"
             if ($status -eq "completed") {
