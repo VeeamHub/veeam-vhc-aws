@@ -137,7 +137,9 @@ jobs:
           Copy-Item dist/win-x64/wwwroot release-bundle/ -Recurse   # admin UI static assets (required by `ui`)
           Copy-Item setup.ps1 release-bundle/
           Copy-Item config/example.yaml release-bundle/
-          @"
+          # Single-quoted here-string: fully literal, so the backtick in `ui` is
+          # not parsed as a PowerShell `u{ } Unicode escape. No interpolation needed.
+          @'
           veeam-vhc-aws — Veeam VHC AWS
           =========================================
 
@@ -163,7 +165,7 @@ jobs:
           command serves the admin GUI from it. setup.ps1 copies it for you.
 
           Docs: https://github.com/VeeamHub/veeam-vhc-aws
-          "@ | Set-Content release-bundle/README.txt
+          '@ | Set-Content release-bundle/README.txt
           $zip = "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip"
           Compress-Archive -Path release-bundle/* -DestinationPath $zip
           Write-Host "--- Zip contents ---"
