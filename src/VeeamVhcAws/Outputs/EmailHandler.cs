@@ -126,24 +126,45 @@ public class EmailHandler : IOutputHandler
         </html>";
     }
 
-    public void Emit(IReadOnlyList<MonitorResult> results)
+    /// <summary>
+    /// Decides whether an email should be sent for these results.
+    /// A daily summary (Metadata["summary"] == true) always sends — even when everything is
+    /// healthy — because an "all clear" report is the point of a daily summary. Alert (non-summary)
+    /// runs are gated by both the minimum-severity threshold and the presence of findings/errors.
+    /// </summary>
+    public bool ShouldEmit(IReadOnlyList<MonitorResult> results, out string? skipReason)
     {
         var isSummary = results.Any(r => r.Metadata.ContainsKey("summary") && r.Metadata["summary"] is true);
 
         if (!isSummary && !ShouldSend(results))
         {
-            Logger.Information("Email skipped — severity below threshold ({MinSeverity})", _minSeverity);
-            return;
+            skipReason = $"severity below threshold ({_minSeverity})";
+            return false;
         }
 
+        // A summary always sends — an "all clear" daily report is the point of a summary.
+        // Only alert (non-summary) runs are suppressed when there is nothing to report.
         var hasContent = results.Any(r => r.Findings.Any(f => f.Severity != Severity.Ok))
                          || results.Any(r => r.Errors.Any());
-        if (!hasContent)
+        if (!isSummary && !hasContent)
         {
-            Logger.Information("Email skipped — no findings or errors to report");
+            skipReason = "no findings or errors to report";
+            return false;
+        }
+
+        skipReason = null;
+        return true;
+    }
+
+    public void Emit(IReadOnlyList<MonitorResult> results)
+    {
+        if (!ShouldEmit(results, out var skipReason))
+        {
+            Logger.Information("Email skipped — {SkipReason}", skipReason);
             return;
         }
 
+        var isSummary = results.Any(r => r.Metadata.ContainsKey("summary") && r.Metadata["summary"] is true);
         var html = BuildHtml(results);
 
         var message = new MimeMessage();
