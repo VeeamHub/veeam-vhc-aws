@@ -46,4 +46,11 @@ public class ServerFormHelpersTests
     {
         Assert.Equal("https://host:9419", ServerFormHelpers.SuggestUrl("  host  ", "", ""));
     }
+
+    // A Name with interior spaces would compose an invalid host — don't hand the user a broken URL.
+    [Fact]
+    public void NameWithInteriorSpaces_DoesNotAutoFill()
+    {
+        Assert.Equal("", ServerFormHelpers.SuggestUrl("my server", "", ""));
+    }
 }

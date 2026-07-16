@@ -29,7 +29,13 @@ public static class ServerFormHelpers
             return url;
 
         if (url.Length == 0 || url == lastAutoUrl)
-            return $"https://{name.Trim()}:{DefaultPort}";
+        {
+            var candidate = $"https://{name.Trim()}:{DefaultPort}";
+            // Only auto-fill a well-formed absolute URL — never hand the user a broken value
+            // (e.g. a Name with interior spaces would compose an invalid host).
+            if (Uri.TryCreate(candidate, UriKind.Absolute, out _))
+                return candidate;
+        }
 
         return url;
     }

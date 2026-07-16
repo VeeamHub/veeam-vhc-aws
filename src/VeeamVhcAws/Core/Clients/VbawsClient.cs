@@ -11,30 +11,25 @@ public class VbawsClient : IVbawsClient
     private static readonly ILogger Logger = Log.ForContext<VbawsClient>();
     private readonly string _baseUrl;
     private readonly VbawsAuth _auth;
-    private readonly bool _verifySsl;
-    private readonly int _timeout;
     private readonly int _retryCount;
     private readonly int _retryDelay;
+    // Single pooled client reused across all requests. A fresh HttpClient per request exhausts
+    // sockets (TIME_WAIT) and re-handshakes TLS every call — pathological under the per-job
+    // pagination fan-out (issue #16), which can make thousands of requests per run.
+    private readonly HttpClient _http;
 
     public VbawsClient(string baseUrl, VbawsAuth auth, bool verifySsl = true,
         int timeout = 30, int retryCount = 2, int retryDelay = 5)
     {
         _baseUrl = baseUrl.TrimEnd('/');
         _auth = auth;
-        _verifySsl = verifySsl;
-        _timeout = timeout;
         _retryCount = retryCount;
         _retryDelay = retryDelay;
-    }
 
-    private HttpClient CreateClient()
-    {
-        var handler = new HttpClientHandler();
-        if (!_verifySsl)
-            handler.ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-
-        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(_timeout) };
+        var handler = new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
+        if (!verifySsl)
+            handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeout) };
     }
 
     private Dictionary<string, object> Request(string method, string path,
@@ -55,12 +50,11 @@ public class VbawsClient : IVbawsClient
             try
             {
                 var headers = _auth.GetHeaders();
-                using var client = CreateClient();
                 var request = new HttpRequestMessage(new HttpMethod(method), url);
                 foreach (var (key, value) in headers)
                     request.Headers.TryAddWithoutValidation(key, value);
 
-                var response = client.SendAsync(request).GetAwaiter().GetResult();
+                var response = _http.SendAsync(request).GetAwaiter().GetResult();
                 var durationMs = sw.ElapsedMilliseconds;
                 Logger.Debug("VBAWS {Method} {Path} -> {StatusCode} ({Duration}ms)",
                     method, path, (int)response.StatusCode, durationMs);
@@ -105,16 +99,17 @@ public class VbawsClient : IVbawsClient
         return new List<Dictionary<string, object>>();
     }
 
+    private static Dictionary<string, string> BaseSessionQuery(DateTime from, DateTime to) => new()
+    {
+        ["from"] = from.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        ["to"] = to.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        ["orderColumn"] = "CreationTime",
+        ["orderAsc"] = "false",
+    };
+
     public List<Dictionary<string, object>> GetSessions(DateTime from, DateTime to)
     {
-        var queryParams = new Dictionary<string, string>
-        {
-            ["from"] = from.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-            ["to"] = to.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-            ["orderColumn"] = "CreationTime",
-            ["orderAsc"] = "false",
-        };
-        var result = Request("GET", "/api/v1/sessions", queryParams);
+        var result = Request("GET", "/api/v1/sessions", BaseSessionQuery(from, to));
         return ExtractDataList(result);
     }
 
@@ -159,16 +154,10 @@ public class VbawsClient : IVbawsClient
 
         for (int page = 0; page < maxPages; page++)
         {
-            var queryParams = new Dictionary<string, string>
-            {
-                ["from"] = from.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                ["to"] = to.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-                ["orderColumn"] = "CreationTime",
-                ["orderAsc"] = "false",
-                [JobFilterParam] = jobId,
-                ["limit"] = pageSize.ToString(),
-                ["skip"] = (page * pageSize).ToString(),
-            };
+            var queryParams = BaseSessionQuery(from, to);
+            queryParams[JobFilterParam] = jobId;
+            queryParams["limit"] = pageSize.ToString();
+            queryParams["skip"] = (page * pageSize).ToString();
             var batch = ExtractDataList(Request("GET", "/api/v1/sessions", queryParams));
             all.AddRange(batch);
             if (batch.Count < pageSize) break; // last page

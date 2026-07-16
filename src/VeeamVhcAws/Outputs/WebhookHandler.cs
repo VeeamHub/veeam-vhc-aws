@@ -500,7 +500,7 @@ public class WebhookHandler : IOutputHandler
 
     public void Emit(IReadOnlyList<MonitorResult> results)
     {
-        var isSummary = results.Any(r => r.Metadata.ContainsKey("summary") && r.Metadata["summary"] is true);
+        var isSummary = results.IsSummary();
 
         if (!isSummary && !ShouldSend(results))
         {

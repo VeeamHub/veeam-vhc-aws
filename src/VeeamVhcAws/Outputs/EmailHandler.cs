@@ -134,7 +134,7 @@ public class EmailHandler : IOutputHandler
     /// </summary>
     public bool ShouldEmit(IReadOnlyList<MonitorResult> results, out string? skipReason)
     {
-        var isSummary = results.Any(r => r.Metadata.ContainsKey("summary") && r.Metadata["summary"] is true);
+        var isSummary = results.IsSummary();
 
         if (!isSummary && !ShouldSend(results))
         {
@@ -164,7 +164,7 @@ public class EmailHandler : IOutputHandler
             return;
         }
 
-        var isSummary = results.Any(r => r.Metadata.ContainsKey("summary") && r.Metadata["summary"] is true);
+        var isSummary = results.IsSummary();
         var html = BuildHtml(results);
 
         var message = new MimeMessage();

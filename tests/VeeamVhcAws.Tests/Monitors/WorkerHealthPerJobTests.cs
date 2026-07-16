@@ -30,14 +30,24 @@ public class WorkerHealthPerJobTests
         }
     };
 
-    private static Dictionary<string, object> Session(string status, string name, string id) => new()
+    private static Dictionary<string, object> Session(string status, string name, string id, string? creationTime = null)
     {
-        ["type"] = "BackupSession",
-        ["status"] = status,
-        ["name"] = name,
-        ["id"] = id,
-        ["result"] = new Dictionary<string, object> { ["message"] = "timeout" },
-    };
+        var s = new Dictionary<string, object>
+        {
+            ["type"] = "BackupSession",
+            ["status"] = status,
+            ["name"] = name,
+            ["result"] = new Dictionary<string, object> { ["message"] = "timeout" },
+        };
+        if (id.Length > 0) s["id"] = id;
+        if (creationTime != null) s["creationTime"] = creationTime;
+        return s;
+    }
+
+    private static double? BackupSessionTotal(MonitorResult r) => r.Findings
+        .Where(f => f.MetricName == "veeam_vbaws_session_total")
+        .Select(f => f.MetricValue)
+        .FirstOrDefault();
 
     // Global fetch is capped: returns only a healthy visible policy, NOT the failed low-frequency one.
     // Per-job fetch for the hidden policy returns its failed session.
@@ -111,5 +121,112 @@ public class WorkerHealthPerJobTests
             .Run(ctx, new PatternEngine(new List<ErrorPattern>()));
 
         Assert.Contains(result.Findings, f => f.Resource == "failed:global-only-policy");
+    }
+
+    // A session with the SAME id in both the global and per-job sets must be counted once
+    // (double-counting would inflate the failure-rate denominator).
+    [Fact]
+    public void Merge_SameId_InBothSets_CountedOnce()
+    {
+        var client = Substitute.For<IVbawsClient>();
+        client.GetSessions(Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns(new List<Dictionary<string, object>> { Session("Failed", "P", "dup") });
+        client.GetPolicies().Returns(new List<Dictionary<string, object>> { new() { ["id"] = "p1" } });
+        client.GetSessionsForJob("p1", Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns(new List<Dictionary<string, object>> { Session("Failed", "P", "dup") }); // same id
+        var ctx = new ServerContext("test-server", "vbaws", VbawsClient: client);
+
+        var result = new WorkerHealthMonitor(Config(perJob: true))
+            .Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Equal(1d, BackupSessionTotal(result));
+    }
+
+    // An id-less session returned by both fetches must dedup by composite key, not double-count.
+    [Fact]
+    public void Merge_IdLessSession_InBothSets_NotDoubleCounted()
+    {
+        var client = Substitute.For<IVbawsClient>();
+        client.GetSessions(Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns(new List<Dictionary<string, object>> { Session("Failed", "P", "") });
+        client.GetPolicies().Returns(new List<Dictionary<string, object>> { new() { ["id"] = "p1" } });
+        client.GetSessionsForJob("p1", Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns(new List<Dictionary<string, object>> { Session("Failed", "P", "") }); // same id-less session
+        var ctx = new ServerContext("test-server", "vbaws", VbawsClient: client);
+
+        var result = new WorkerHealthMonitor(Config(perJob: true))
+            .Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Equal(1d, BackupSessionTotal(result));
+    }
+
+    // A per-job fetch that throws for SOME policies must still merge the survivors and record an error.
+    [Fact]
+    public void PerJob_PartialFailure_MergesSurvivors_AndRecordsError()
+    {
+        var client = Substitute.For<IVbawsClient>();
+        client.GetSessions(Arg.Any<DateTime>(), Arg.Any<DateTime>()).Returns(new List<Dictionary<string, object>>());
+        client.GetPolicies().Returns(new List<Dictionary<string, object>>
+        {
+            new() { ["id"] = "p1" }, new() { ["id"] = "p2" }, new() { ["id"] = "p3" },
+        });
+        client.GetSessionsForJob("p1", Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns(new List<Dictionary<string, object>> { Session("Failed", "A", "a1") });
+        client.GetSessionsForJob("p2", Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns<List<Dictionary<string, object>>>(_ => throw new Exception("boom-p2"));
+        client.GetSessionsForJob("p3", Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns(new List<Dictionary<string, object>> { Session("Failed", "C", "c1") });
+        var ctx = new ServerContext("test-server", "vbaws", VbawsClient: client);
+
+        var result = new WorkerHealthMonitor(Config(perJob: true))
+            .Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Contains(result.Findings, f => f.Resource == "failed:A");
+        Assert.Contains(result.Findings, f => f.Resource == "failed:C");
+        Assert.Contains(result.Errors, e => e.Contains("p2"));
+    }
+
+    // Concurrency under real fan-out: all policies' sessions must survive (no lost writes / gate drops).
+    [Fact]
+    public void PerJob_ManyPolicies_CollectsAll()
+    {
+        var client = Substitute.For<IVbawsClient>();
+        client.GetSessions(Arg.Any<DateTime>(), Arg.Any<DateTime>()).Returns(new List<Dictionary<string, object>>());
+        var policies = new List<Dictionary<string, object>>();
+        for (int i = 0; i < 50; i++)
+        {
+            var id = $"p{i}";
+            policies.Add(new Dictionary<string, object> { ["id"] = id });
+            client.GetSessionsForJob(id, Arg.Any<DateTime>(), Arg.Any<DateTime>())
+                .Returns(new List<Dictionary<string, object>> { Session("Failed", $"policy-{i}", $"s{i}") });
+        }
+        client.GetPolicies().Returns(policies);
+        var ctx = new ServerContext("test-server", "vbaws", VbawsClient: client);
+
+        var result = new WorkerHealthMonitor(Config(perJob: true))
+            .Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        for (int i = 0; i < 50; i++)
+            Assert.Contains(result.Findings, f => f.Resource == $"failed:policy-{i}");
+    }
+
+    // Exceeding the per-job cap must be surfaced as an error, not silently truncated.
+    [Fact]
+    public void PerJob_ExceedingCap_RecordsError()
+    {
+        var client = Substitute.For<IVbawsClient>();
+        client.GetSessions(Arg.Any<DateTime>(), Arg.Any<DateTime>()).Returns(new List<Dictionary<string, object>>());
+        var policies = new List<Dictionary<string, object>>();
+        for (int i = 0; i < 201; i++)
+            policies.Add(new Dictionary<string, object> { ["id"] = $"p{i}" });
+        client.GetPolicies().Returns(policies);
+        client.GetSessionsForJob(Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<DateTime>())
+            .Returns(new List<Dictionary<string, object>>());
+        var ctx = new ServerContext("test-server", "vbaws", VbawsClient: client);
+
+        var result = new WorkerHealthMonitor(Config(perJob: true))
+            .Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Contains(result.Errors, e => e.Contains("capped at 200"));
     }
 }
