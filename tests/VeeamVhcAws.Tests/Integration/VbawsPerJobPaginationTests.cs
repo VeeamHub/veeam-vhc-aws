@@ -68,5 +68,26 @@ public class VbawsPerJobPaginationTests : IDisposable
         Assert.Equal("p1", policies[0]["id"]?.ToString());
     }
 
+    // If the appliance ignores skip/limit and returns the same full page every time, the loop
+    // must stop as soon as a page adds no new ids — not re-fetch identically up to maxPages (50).
+    [Fact]
+    public void GetSessionsForJob_StopsEarly_WhenApiIgnoresSkip()
+    {
+        // Every /sessions GET returns the SAME 200 rows regardless of skip.
+        var samePage = Enumerable.Range(0, 200)
+            .Select(i => (object)new { id = $"s{i}", type = "BackupSession", status = "Success" }).ToArray();
+        _server.Given(Request.Create().WithPath("/api/v1/sessions").UsingGet())
+            .RespondWith(Response.Create().WithStatusCode(200)
+                .WithHeader("Content-Type", "application/json")
+                .WithBodyAsJson(new { data = samePage }));
+
+        var sessions = _client.GetSessionsForJob("job-1", DateTime.UtcNow.AddHours(-24), DateTime.UtcNow);
+
+        Assert.Equal(200, sessions.Count); // deduped to the unique set
+        var sessionRequests = _server.LogEntries.Count(e =>
+            e.RequestMessage.Path == "/api/v1/sessions" && e.RequestMessage.Method == "GET");
+        Assert.Equal(2, sessionRequests); // page 1 (200 new) + page 2 (0 new → stop), not 50
+    }
+
     public void Dispose() => _server.Stop();
 }

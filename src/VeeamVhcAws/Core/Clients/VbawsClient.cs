@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Serilog;
 using VeeamVhcAws.Core.Auth;
+using VeeamVhcAws.Core.Config;
 
 namespace VeeamVhcAws.Core.Clients;
 
@@ -151,6 +152,7 @@ public class VbawsClient : IVbawsClient
         const int pageSize = 200;
         const int maxPages = 50; // circuit breaker: cap 10k sessions per job
         var all = new List<Dictionary<string, object>>();
+        var seenIds = new HashSet<string>();
 
         for (int page = 0; page < maxPages; page++)
         {
@@ -159,8 +161,22 @@ public class VbawsClient : IVbawsClient
             queryParams["limit"] = pageSize.ToString();
             queryParams["skip"] = (page * pageSize).ToString();
             var batch = ExtractDataList(Request("GET", "/api/v1/sessions", queryParams));
-            all.AddRange(batch);
-            if (batch.Count < pageSize) break; // last page
+            if (batch.Count == 0) break;
+
+            // The VBAWS API is known to ignore some query params and filter client-side. If it
+            // ignores skip/limit, every page returns the same rows — so stop as soon as a page
+            // contributes no new session id, rather than re-fetching identical data up to maxPages.
+            int added = 0;
+            foreach (var s in batch)
+            {
+                var id = s.GetApiString("id", "Id", "");
+                if (id.Length == 0 || seenIds.Add(id))
+                {
+                    all.Add(s);
+                    added++;
+                }
+            }
+            if (added == 0 || batch.Count < pageSize) break;
         }
 
         return all;
