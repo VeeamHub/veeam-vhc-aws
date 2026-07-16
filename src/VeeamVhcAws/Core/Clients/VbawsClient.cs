@@ -135,4 +135,45 @@ public class VbawsClient : IVbawsClient
             new Dictionary<string, string> { ["type"] = "HealthCheck" });
         return ExtractDataList(result);
     }
+
+    // --- Issue #16: per-policy session scoping ---
+    // NOTE (needs-live-validation): the policy-listing route and the per-job session filter
+    // parameter below are ASSUMED against the VBAWS REST contract and must be confirmed against a
+    // live appliance before this ships. They are isolated as constants so a correction is one edit.
+    // The consumer (WorkerHealthMonitor) degrades gracefully to the global fetch if these return
+    // nothing, so a wrong route cannot reduce existing coverage — only fail to add to it.
+    private const string PoliciesPath = "/api/v1/policies";
+    private const string JobFilterParam = "jobId";
+
+    public List<Dictionary<string, object>> GetPolicies()
+    {
+        var result = Request("GET", PoliciesPath);
+        return ExtractDataList(result);
+    }
+
+    public List<Dictionary<string, object>> GetSessionsForJob(string jobId, DateTime from, DateTime to)
+    {
+        const int pageSize = 200;
+        const int maxPages = 50; // circuit breaker: cap 10k sessions per job
+        var all = new List<Dictionary<string, object>>();
+
+        for (int page = 0; page < maxPages; page++)
+        {
+            var queryParams = new Dictionary<string, string>
+            {
+                ["from"] = from.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                ["to"] = to.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                ["orderColumn"] = "CreationTime",
+                ["orderAsc"] = "false",
+                [JobFilterParam] = jobId,
+                ["limit"] = pageSize.ToString(),
+                ["skip"] = (page * pageSize).ToString(),
+            };
+            var batch = ExtractDataList(Request("GET", "/api/v1/sessions", queryParams));
+            all.AddRange(batch);
+            if (batch.Count < pageSize) break; // last page
+        }
+
+        return all;
+    }
 }

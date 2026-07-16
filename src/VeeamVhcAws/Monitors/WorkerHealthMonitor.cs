@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using Serilog;
+using VeeamVhcAws.Core.Clients;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
@@ -108,6 +110,88 @@ public class WorkerHealthMonitor : IMonitor
         return filtered;
     }
 
+    /// <summary>
+    /// Collects VBAWS sessions for the window. Always includes the global fetch as a baseline so
+    /// coverage never shrinks. When per-job scoping is enabled (issue #16) it also queries sessions
+    /// per policy — the global /sessions endpoint is recency-capped and silently drops low-frequency
+    /// policies — then unions and dedups by session id. Bounded concurrency + a max-jobs circuit
+    /// breaker prevent an N+1 fan-out; any per-job failure degrades to the baseline set.
+    /// </summary>
+    private static List<Dictionary<string, object>> CollectSessions(
+        IVbawsClient client, DateTime fromDt, DateTime now, bool perJobEnabled, List<string> errors)
+    {
+        // Baseline: the original global fetch — guarantees we never return fewer sessions than before.
+        var baseline = client.GetSessions(fromDt, now);
+        if (!perJobEnabled)
+            return baseline;
+
+        const int maxJobs = 200;      // circuit breaker on per-job fan-out
+        const int maxConcurrency = 6; // bound parallel API calls
+
+        List<Dictionary<string, object>> policies;
+        try
+        {
+            policies = client.GetPolicies() ?? new List<Dictionary<string, object>>();
+        }
+        catch (Exception e)
+        {
+            errors.Add($"Per-job session scoping skipped (GetPolicies failed): {e.Message}");
+            return baseline;
+        }
+
+        var jobIds = policies
+            .Select(p => p.GetApiString("id", "Id", ""))
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Distinct()
+            .Take(maxJobs)
+            .ToList();
+        if (jobIds.Count == 0)
+            return baseline;
+
+        var perJob = new ConcurrentBag<Dictionary<string, object>>();
+        var perJobErrors = new ConcurrentBag<string>();
+        using (var gate = new SemaphoreSlim(maxConcurrency))
+        {
+            var tasks = jobIds.Select(id => Task.Run(() =>
+            {
+                gate.Wait();
+                try
+                {
+                    foreach (var s in client.GetSessionsForJob(id, fromDt, now))
+                        perJob.Add(s);
+                }
+                catch (Exception e)
+                {
+                    perJobErrors.Add($"Per-job session fetch failed for policy {id}: {e.Message}");
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            })).ToArray();
+            Task.WaitAll(tasks);
+        }
+        foreach (var e in perJobErrors) errors.Add(e);
+
+        // Union baseline + per-job, dedup by session id (sessions without an id are kept as-is).
+        var byId = new Dictionary<string, Dictionary<string, object>>();
+        var noId = new List<Dictionary<string, object>>();
+        foreach (var s in baseline.Concat(perJob))
+        {
+            var id = s.GetApiString("id", "Id", "");
+            if (string.IsNullOrEmpty(id))
+                noId.Add(s);
+            else
+                byId[id] = s;
+        }
+
+        var merged = byId.Values.Concat(noId).ToList();
+        Logger.Information(
+            "VBAWS sessions: {Baseline} global + {PerJob} per-job across {Jobs} policies -> {Merged} unique",
+            baseline.Count, perJob.Count, jobIds.Count, merged.Count);
+        return merged;
+    }
+
     public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine, FindingState? findingState = null)
     {
         var sw = Stopwatch.StartNew();
@@ -128,7 +212,8 @@ public class WorkerHealthMonitor : IMonitor
         List<Dictionary<string, object>> sessions;
         try
         {
-            sessions = serverContext.VbawsClient!.GetSessions(fromDt, now);
+            sessions = CollectSessions(serverContext.VbawsClient!, fromDt, now,
+                perJobEnabled: cfg.Get("per_job_sessions", true), errors);
         }
         catch (Exception e)
         {
