@@ -133,39 +133,69 @@ public class VbawsClient : IVbawsClient
     }
 
     // --- Issue #16: per-policy session scoping ---
-    // NOTE (needs-live-validation): the policy-listing route and the per-job session filter
-    // parameter below are ASSUMED against the VBAWS REST contract and must be confirmed against a
-    // live appliance before this ships. They are isolated as constants so a correction is one edit.
-    // The consumer (WorkerHealthMonitor) degrades gracefully to the global fetch if these return
-    // nothing, so a wrong route cannot reduce existing coverage — only fail to add to it.
-    private const string PoliciesPath = "/api/v1/policies";
-    private const string JobFilterParam = "jobId";
+    // The global GET /sessions is capped (undocumented, empirically ~5k). GET /sessions supports a
+    // server-side PolicyId filter (VBAWS REST 1.8-rev0), so querying per policy retrieves each
+    // policy's own set independent of the global cap. Routes + params below are from the official
+    // VBAWS 10 (1.8-rev0) reference. The consumer degrades to the global fetch if these return
+    // nothing, so coverage can never shrink. Still needs-live-validation for ONE thing: whether the
+    // cap resets per PolicyId (expected) — the contract does not document the cap at all.
+    private const string SessionPolicyFilterParam = "PolicyId";
+
+    // Policies are enumerated per workload — there is no single /policies collection.
+    private static readonly string[] PolicyRoutes =
+    {
+        "/api/v1/virtualMachines/policies",     // EC2
+        "/api/v1/policy/ec2SlaBasedPolicies",   // EC2 SLA-based
+        "/api/v1/rds/policies",                 // RDS
+        "/api/v1/efs/policies",                 // EFS
+        "/api/v1/dynamoDb/policies",            // DynamoDB
+        "/api/v1/fsx/policies",                 // FSx
+        "/api/v1/redshift/policies",            // Redshift
+        "/api/v1/redshiftServerless/policies",  // Redshift Serverless
+    };
 
     public List<Dictionary<string, object>> GetPolicies()
     {
-        var result = Request("GET", PoliciesPath);
-        return ExtractDataList(result);
+        var all = new List<Dictionary<string, object>>();
+        foreach (var route in PolicyRoutes)
+        {
+            try
+            {
+                all.AddRange(ExtractDataList(Request("GET", route)));
+            }
+            catch (Exception e)
+            {
+                // A workload may be unlicensed/unconfigured (e.g. 404) — skip it, keep the rest.
+                Logger.Debug("VBAWS policy route {Route} unavailable: {Error}", route, e.Message);
+            }
+        }
+        return all;
     }
 
-    public List<Dictionary<string, object>> GetSessionsForJob(string jobId, DateTime from, DateTime to)
+    public List<Dictionary<string, object>> GetSessionsForJob(string policyId, DateTime from, DateTime to)
     {
         const int pageSize = 200;
-        const int maxPages = 50; // circuit breaker: cap 10k sessions per job
+        const int maxPages = 50; // circuit breaker: cap 10k sessions per policy
         var all = new List<Dictionary<string, object>>();
         var seenIds = new HashSet<string>();
 
         for (int page = 0; page < maxPages; page++)
         {
-            var queryParams = BaseSessionQuery(from, to);
-            queryParams[JobFilterParam] = jobId;
-            queryParams["limit"] = pageSize.ToString();
-            queryParams["skip"] = (page * pageSize).ToString();
+            // Documented VBAWS 1.8-rev0 params: PolicyId (server-side scope), Limit, Offset, Sort.
+            // Lookback windowing is applied client-side by the caller (FilterByLookback), so
+            // FromUtc/ToUtc are intentionally omitted here.
+            var queryParams = new Dictionary<string, string>
+            {
+                [SessionPolicyFilterParam] = policyId,
+                ["Limit"] = pageSize.ToString(),
+                ["Offset"] = (page * pageSize).ToString(),
+                ["Sort"] = "startTimeDesc",
+            };
             var batch = ExtractDataList(Request("GET", "/api/v1/sessions", queryParams));
             if (batch.Count == 0) break;
 
-            // The VBAWS API is known to ignore some query params and filter client-side. If it
-            // ignores skip/limit, every page returns the same rows — so stop as soon as a page
-            // contributes no new session id, rather than re-fetching identical data up to maxPages.
+            // Defensive: if a server ignores Offset and returns the same rows each page, stop as
+            // soon as a page contributes no new session id, rather than looping to maxPages.
             int added = 0;
             foreach (var s in batch)
             {
