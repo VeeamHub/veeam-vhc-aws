@@ -13,6 +13,7 @@
     private bool _verifySsl;
     private string _apiVersion = "1.3-rev1";
     private string? _error;
+    private string _lastAutoUrl = "";
 
     protected override void OnParametersSet()
     {
@@ -30,6 +31,19 @@
     {
         _password = e.Value?.ToString() ?? "";
         _passwordChanged = true;
+    }
+
+    // Issue #13: auto-fill the URL from the Name as a convenience, but only while the user
+    // hasn't hand-edited the URL (tracked via _lastAutoUrl).
+    private void OnNameInput(ChangeEventArgs e)
+    {
+        _name = e.Value?.ToString() ?? "";
+        var suggested = ServerFormHelpers.SuggestUrl(_name, _url, _lastAutoUrl);
+        if (suggested != _url)
+        {
+            _url = suggested;
+            _lastAutoUrl = suggested;
+        }
     }
 
     private async Task Save()
@@ -65,7 +79,7 @@
 
         <div class="form-row">
             <label>Name <span class="muted">(unique label)</span></label>
-            <input type="text" @bind="_name" @bind:event="oninput" placeholder="e.g. prod-vbr" disabled="@(!IsNew)" />
+            <input type="text" value="@_name" @oninput="OnNameInput" placeholder="e.g. prod-vbr" disabled="@(!IsNew)" />
         </div>
 
         <div class="form-row">
