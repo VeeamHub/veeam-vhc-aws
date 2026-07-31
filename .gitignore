@@ -58,3 +58,6 @@ test-smtp.yaml
 src/.DS_Store
 src/VeeamVhcAws/.DS_Store
 .DS_Store
+
+# Live monitor config — contains real credentials, never commit
+veeam-monitor.yaml
