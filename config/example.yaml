@@ -130,6 +130,11 @@ retention:
 worker_health:
   enabled: true
   lookback_hours: 24
+  # Per-policy session scoping (issue #16): the global VBAWS /sessions fetch is capped and can
+  # hide sessions for low-frequency policies. When true, sessions are also queried per policy and
+  # merged. Default false — the policy route/filter are pending live-appliance confirmation; enable
+  # only after validating against your VBAWS version.
+  per_job_sessions: false
   thresholds:
     session_failure_rate_warning: 0.1
     session_failure_rate_critical: 0.3

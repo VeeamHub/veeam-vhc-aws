@@ -59,5 +59,6 @@ src/.DS_Store
 src/VeeamVhcAws/.DS_Store
 .DS_Store
 
-# Live monitor config — contains real credentials, never commit
+# Live/local monitoring configs — never commit (contain server creds)
 veeam-monitor.yaml
+/config.yaml

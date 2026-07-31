@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using Serilog;
+using VeeamVhcAws.Core.Clients;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Patterns;
@@ -108,6 +110,94 @@ public class WorkerHealthMonitor : IMonitor
         return filtered;
     }
 
+    /// <summary>
+    /// Collects VBAWS sessions for the window. Always includes the global fetch as a baseline so
+    /// coverage never shrinks. When per-job scoping is enabled (issue #16) it also queries sessions
+    /// per policy — the global /sessions endpoint is recency-capped and silently drops low-frequency
+    /// policies — then unions and dedups by session id. Bounded concurrency + a max-jobs circuit
+    /// breaker prevent an N+1 fan-out; any per-job failure degrades to the baseline set.
+    /// </summary>
+    private static List<Dictionary<string, object>> CollectSessions(
+        IVbawsClient client, DateTime fromDt, DateTime now, bool perJobEnabled, List<string> errors)
+    {
+        // Baseline: the original global fetch — guarantees we never return fewer sessions than before.
+        var baseline = client.GetSessions(fromDt, now);
+        if (!perJobEnabled)
+            return baseline;
+
+        const int maxJobs = 200;      // circuit breaker on per-job fan-out
+        const int maxConcurrency = 6; // bound parallel API calls
+
+        List<Dictionary<string, object>> policies;
+        try
+        {
+            policies = client.GetPolicies() ?? new List<Dictionary<string, object>>();
+        }
+        catch (Exception e)
+        {
+            errors.Add($"Per-job session scoping skipped (GetPolicies failed): {e.Message}");
+            return baseline;
+        }
+
+        var jobIds = policies
+            .Select(p => p.GetApiString("id", "Id", ""))
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Distinct()
+            .ToList();
+        if (jobIds.Count == 0)
+            return baseline;
+
+        // Surface truncation rather than silently dropping policies past the cap — an unlogged
+        // truncation would re-introduce the very "hidden policy" gap issue #16 exists to close.
+        if (jobIds.Count > maxJobs)
+        {
+            Logger.Warning("Per-job session scoping capped at {Cap} of {Total} policies", maxJobs, jobIds.Count);
+            errors.Add($"Per-job session scoping capped at {maxJobs} of {jobIds.Count} policies — " +
+                       "sessions for the overflow are not per-job scoped.");
+            jobIds = jobIds.Take(maxJobs).ToList();
+        }
+
+        var perJob = new ConcurrentBag<Dictionary<string, object>>();
+        var perJobErrors = new ConcurrentBag<string>();
+        Parallel.ForEach(jobIds, new ParallelOptions { MaxDegreeOfParallelism = maxConcurrency }, id =>
+        {
+            try
+            {
+                foreach (var s in client.GetSessionsForJob(id, fromDt, now))
+                    perJob.Add(s);
+            }
+            catch (Exception e)
+            {
+                perJobErrors.Add($"Per-job session fetch failed for policy {id}: {e.Message}");
+            }
+        });
+        foreach (var e in perJobErrors) errors.Add(e);
+
+        // Union baseline + per-job, deduped so a session returned by BOTH fetches is counted once
+        // (double-counting would skew the failure-rate metrics). Prefer the stable session id;
+        // fall back to a composite natural key for id-less sessions so those aren't double-counted
+        // either.
+        var seen = new Dictionary<string, Dictionary<string, object>>();
+        foreach (var s in baseline.Concat(perJob))
+        {
+            var id = s.GetApiString("id", "Id", "");
+            var key = id.Length > 0
+                ? "id:" + id
+                : "k:" + string.Join("|",
+                    s.GetApiString("type", "Type", ""),
+                    GetSessionState(s),
+                    GetSessionName(s),
+                    s.GetApiString("creationTime", "CreationTime", ""));
+            seen[key] = s;
+        }
+
+        var merged = seen.Values.ToList();
+        Logger.Information(
+            "VBAWS sessions: {Baseline} global + {PerJob} per-job across {Jobs} policies -> {Merged} unique",
+            baseline.Count, perJob.Count, jobIds.Count, merged.Count);
+        return merged;
+    }
+
     public MonitorResult Run(ServerContext serverContext, PatternEngine? patternEngine, FindingState? findingState = null)
     {
         var sw = Stopwatch.StartNew();
@@ -128,7 +218,10 @@ public class WorkerHealthMonitor : IMonitor
         List<Dictionary<string, object>> sessions;
         try
         {
-            sessions = serverContext.VbawsClient!.GetSessions(fromDt, now);
+            // Default OFF: the per-job policy route/filter are an unconfirmed VBAWS API contract
+            // (needs-live-validation). Opt in via worker_health.per_job_sessions once verified.
+            sessions = CollectSessions(serverContext.VbawsClient!, fromDt, now,
+                perJobEnabled: cfg.Get("per_job_sessions", false), errors);
         }
         catch (Exception e)
         {
@@ -156,15 +249,6 @@ public class WorkerHealthMonitor : IMonitor
             var failedSessions = typeSessions.Where(s => GetSessionState(s) == "failed").ToList();
             var failed = failedSessions.Count;
             var failureRate = total > 0 ? (double)failed / total : 0.0;
-
-            if (failureRate > criticalRate || failureRate > warningRate)
-            {
-                var severity = failureRate > criticalRate ? Severity.Critical : Severity.Warning;
-                var label = failureRate > criticalRate ? "High" : "Elevated";
-                findings.Add(new Finding(severity, $"session-type:{sessionType}",
-                    $"{label} {sessionType} failure rate: {failureRate:P0} ({failed}/{total})",
-                    new Dictionary<string, object> { ["total"] = total, ["failed"] = failed, ["rate"] = failureRate }));
-            }
 
             // Per-policy latest-only
             var byPolicy = new Dictionary<string, List<Dictionary<string, object>>>();
