@@ -58,3 +58,6 @@ test-smtp.yaml
 src/.DS_Store
 src/VeeamVhcAws/.DS_Store
 .DS_Store
+
+# Local runtime config — keep local
+veeam-monitor.yaml
