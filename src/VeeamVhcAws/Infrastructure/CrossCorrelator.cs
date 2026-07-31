@@ -53,6 +53,23 @@ public static class CrossCorrelator
                     new Dictionary<string, object> { ["correlation"] = "M2+M3" }));
             }
 
+            var failedPolicies = allFindings
+                .Where(x => x.MonitorValue == "worker_health" && x.Finding.Resource.StartsWith("failed:"))
+                .Select(x => x.Finding.Resource)
+                .Distinct()
+                .ToList();
+            if (failedPolicies.Count >= 2)
+            {
+                var worstPolicySev = allFindings
+                    .Where(x => x.MonitorValue == "worker_health" && x.Finding.Resource.StartsWith("failed:"))
+                    .Max(x => x.Finding.Severity.Rank());
+                var summarySev = worstPolicySev >= Severity.Critical.Rank() ? Severity.Critical : Severity.Warning;
+                correlations.Add(new Finding(summarySev,
+                    $"[{serverName}] cross-correlation",
+                    $"Widespread session failures: {failedPolicies.Count} policies failing",
+                    new Dictionary<string, object> { ["correlation"] = "M3-breadth", ["count"] = failedPolicies.Count }));
+            }
+
             var hasOrphaned = allFindings.Any(x =>
                 x.Finding.Message.Contains("orphan", StringComparison.OrdinalIgnoreCase));
             if (hasOrphaned)

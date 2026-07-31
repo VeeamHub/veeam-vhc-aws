@@ -3,6 +3,9 @@ name: Release
 on:
   push:
     branches: [master]
+  # Manual trigger — lets you re-cut a release (or release a chosen ref) from the Actions tab
+  # without a new merge. Version stays csproj <Version> + run number, same as the push path.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,7 +16,7 @@ jobs:
     name: Test (.NET)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -28,7 +31,7 @@ jobs:
     name: Security Gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -50,7 +53,7 @@ jobs:
     runs-on: windows-latest
     needs: [test, security]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
