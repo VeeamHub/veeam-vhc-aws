@@ -31,5 +31,5 @@ This directory is the maintained source for verifying the web admin UI. Read thi
 - [Alerts](./alerts.md) filters findings and suppresses one. An empty install has no rows.
 - [Outputs](./outputs.md) adds, edits, and deletes a notification handler.
 - [Thresholds](./thresholds.md) edits repo, retention, and worker thresholds.
-
-Settings (`/settings`) and Captures (`/captures`) are not mapped yet. Settings writes the `global` and `daily_summary` sections. Captures lists `captured_errors` from the state file and uses the same suppress path as Alerts.
+- [Settings](./settings.md) edits logging, HTTP tuning, and the daily summary toggle.
+- [Captures](./captures.md) lists captured errors and suppresses one. An empty install has no rows.

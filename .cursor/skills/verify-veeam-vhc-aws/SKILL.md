@@ -23,7 +23,7 @@ That command does all of the following.
 
 1. It creates `/tmp/vhc-verify/runs/<run-id>/data/` and uses that directory as the process working directory.
 2. It picks a free loopback port. It does not reuse 9101 if something else owns it.
-3. It runs this from the data directory, with `<repo>` as the checkout and `<port>` as the chosen port.
+3. It starts the UI with `dotnet run` from the data directory, with `<repo>` as the checkout and `<port>` as the chosen port.
 
 ```bash
 dotnet run --project <repo>/src/VeeamVhcAws/VeeamVhcAws.csproj -- ui \
@@ -33,11 +33,13 @@ dotnet run --project <repo>/src/VeeamVhcAws/VeeamVhcAws.csproj -- ui \
   --no-browser
 ```
 
+`dotnet run` then sets the process working directory to the project directory (`<repo>/src/VeeamVhcAws`), not the data directory. The config path above is absolute, so the yaml still lives in the data directory.
+
 4. It waits until `GET /healthz` returns `{"status":"ok"}` and `GET /` contains both `VHC AWS` and `Dashboard`. The console line `Veeam VHC AWS Admin UI:` prints before the server accepts connections. That line is not readiness.
 
 Loopback has no auth token. Do not pass `--bind 0.0.0.0`. A non-loopback bind reads or creates `~/.vhc/ui-token.txt`, which is shared by every UI on the machine.
 
-The state file defaults to `./veeam-vhc-aws-state.json` and is resolved from the process working directory when the process starts. Two UIs can run together only when each launch has its own `VHC_VERIFY_RUN_ID`, its own data directory, and its own port. Leave the variable unset for a single run. The helper records that run in `/tmp/vhc-verify/latest`.
+The state file defaults to `./veeam-vhc-aws-state.json`, resolved from the process working directory. Under this helper that file is `<repo>/src/VeeamVhcAws/veeam-vhc-aws-state.json`. Launch prints it as `state`. The Settings page shows the same path. Pages read the file on each load, so you can write it after launch and reload. It is gitignored. Two UIs can run together only when each launch has its own `VHC_VERIFY_RUN_ID`, its own data directory, and its own port. Leave the variable unset for a single run. The helper records that run in `/tmp/vhc-verify/latest`.
 
 Requires the .NET 10 SDK (`dotnet` on `PATH`) and Google Chrome (`CHROME_BIN` or a standard install path). On a Cloud Agent checkout that has neither SDK nor packages, run `bash .cursor/install.sh` once.
 
@@ -55,7 +57,7 @@ Exit 0 prints `doctor=ok` plus the URL, pid, port, config path, and whether the 
 
 Read `features/README.md`, then the feature file. Prefer the commands in that file over ad hoc clicks.
 
-The browser talks to the UI with role, accessible name, and the visible label text. Most labels are not tied to their inputs with `for` or by wrapping the control. `fill` and `select` find the label text, then the control in that label or in the same `form-row`.
+The browser talks to the UI with role, accessible name, and the visible label text. Each control has an accessible name. Sibling labels use `for` and `id`. Checkboxes, radios, and the filter dropdowns are wrapped by their labels. `fill` and `select` find the label text, then the control in that label or in the same `form-row`.
 
 ```bash
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser goto /servers
@@ -118,7 +120,8 @@ Invoke the helper by path. `chmod +x` is already set in git.
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser goto /servers
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role link --name Servers
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name Save
-.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name Delete --within-heading "Delete server?"
+.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Delete lab-vbr"
+.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Confirm delete"
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser fill --label Name --value lab-vbr
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser select --label Type --value json_file
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-heading "Add Server"
@@ -129,7 +132,7 @@ Invoke the helper by path. `chmod +x` is already set in git.
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser assert-absent "No servers configured yet."
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser screenshot --path /tmp/vhc-verify/evidence/<run-id>/servers/page.png
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser snapshot --path /tmp/vhc-verify/evidence/<run-id>/servers/page.aria.txt
-.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify assert-server --name lab-vbr --url https://lab-vbr.example:9419 --username backupadmin --password-absent verify-secret
+.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify assert-server --name lab-vbr --url https://lab-vbr.example:9419 --username backupadmin --password-absent verify-secret --verify-ssl true
 .cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify cleanup
 ```
 
