@@ -29,7 +29,6 @@ public static class ConfigLoader
     {
         ["global"] = new Dictionary<string, object>
         {
-            ["log_level"] = "DEBUG",
             ["timeout_seconds"] = 30,
             ["session_timeout_seconds"] = 600,
             ["retry_count"] = 2,

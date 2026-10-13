@@ -29,5 +29,6 @@ public class SettingsPageTests
         var yaml = File.ReadAllText(ui.ConfigPath);
         Assert.Contains("INFO", yaml);
         Assert.Contains("./ops.log", yaml);
+        Assert.DoesNotContain("log_level:", yaml);
     }
 }

@@ -29,5 +29,5 @@ Preconditions:
 
 - The Files table is read-only. The state path is where Alerts and Captures read `veeam-vhc-aws-state.json` unless `global.state_file` says otherwise. Under this helper that path is the project directory, because `dotnet run` sets the working directory there.
 - Number boxes use `for` and `id`. `fill --label` uses the label text.
-- Saving writes the logging map and the HTTP keys together. A field you did not edit is still written at the value shown on the page.
+- Saving writes the logging map and the HTTP keys together. A field you did not edit is still written at the value shown on the page. The monitor reads `logging.level`. A save does not also write `global.log_level`.
 - The daily summary line says the time is controlled by the scheduled task.
