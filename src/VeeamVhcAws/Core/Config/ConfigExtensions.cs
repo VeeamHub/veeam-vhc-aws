@@ -38,15 +38,11 @@ public static class ConfigExtensions
     public static Dictionary<string, object> GetSection(this Dictionary<string, object> dict, string key)
     {
         if (dict.TryGetValue(key, out var value) && value is Dictionary<string, object> section)
-            return section;
+            return NormalizeSection(section);
 
-        // YamlDotNet may deserialize as Dictionary<object,object>
+        // YamlDotNet deserializes maps as Dictionary<object, object>, including nested maps.
         if (dict.TryGetValue(key, out var rawValue) && rawValue is Dictionary<object, object> rawSection)
-        {
-            return rawSection.ToDictionary(
-                kv => kv.Key?.ToString() ?? "",
-                kv => kv.Value ?? (object)"");
-        }
+            return NormalizeMap(rawSection);
 
         return new Dictionary<string, object>();
     }
@@ -71,11 +67,9 @@ public static class ConfigExtensions
         {
             return list.Select(item =>
             {
-                if (item is Dictionary<string, object> d) return d;
+                if (item is Dictionary<string, object> d) return NormalizeSection(d);
                 if (item is Dictionary<object, object> raw)
-                    return raw.ToDictionary(
-                        kv => kv.Key?.ToString() ?? "",
-                        kv => kv.Value ?? (object)"");
+                    return NormalizeMap(raw);
                 return new Dictionary<string, object>();
             }).ToList();
         }
@@ -129,4 +123,29 @@ public static class ConfigExtensions
         if (bool.TryParse(val?.ToString(), out var parsed)) return parsed;
         return defaultValue;
     }
+
+    private static Dictionary<string, object> NormalizeSection(Dictionary<string, object> section)
+    {
+        var result = new Dictionary<string, object>(section.Count);
+        foreach (var (key, value) in section)
+            result[key] = NormalizeValue(value);
+        return result;
+    }
+
+    private static Dictionary<string, object> NormalizeMap(Dictionary<object, object> raw)
+    {
+        var result = new Dictionary<string, object>(raw.Count);
+        foreach (var (key, value) in raw)
+            result[key?.ToString() ?? ""] = NormalizeValue(value);
+        return result;
+    }
+
+    private static object NormalizeValue(object? value) => value switch
+    {
+        Dictionary<string, object> typed => NormalizeSection(typed),
+        Dictionary<object, object> raw => NormalizeMap(raw),
+        List<object> list => list.Select(NormalizeValue).ToList(),
+        null => "",
+        _ => value!,
+    };
 }

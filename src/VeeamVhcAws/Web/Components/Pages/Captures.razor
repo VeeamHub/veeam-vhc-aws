@@ -8,17 +8,25 @@
 <p class="muted">All errors the monitors have observed, with suppression history.</p>
 
 <div class="toolbar">
-    <label>Show:
-        <select @bind="_filter">
+    <label for="captures-filter">Show:
+        <select id="captures-filter" @bind="Filter">
             <option value="all">All</option>
             <option value="unsuppressed">Unsuppressed only</option>
             <option value="suppressed">Suppressed only</option>
         </select>
     </label>
-    <button class="btn" @onclick="Refresh">Refresh</button>
+    <button type="button" class="btn" @onclick="Refresh">Refresh</button>
 </div>
 
-@if (_filtered.Count == 0)
+@if (_snapshot is null)
+{
+    <p>Loading…</p>
+}
+else if (_snapshot.CapturedErrors.Count == 0)
+{
+    <p class="empty">No captured errors yet.</p>
+}
+else if (_filtered.Count == 0)
 {
     <p class="empty">No captured errors match the current filter.</p>
 }
@@ -42,7 +50,7 @@ else
             @foreach (var a in _filtered)
             {
                 <tr class="row-@a.Severity @(a.Suppressed ? "suppressed" : "")">
-                    <td class="key">@a.Key[..8]</td>
+                    <td class="key">@AlertLabels.KeyPreview(a.Key)</td>
                     <td><SeverityBadge Severity="@a.Severity" /></td>
                     <td>@a.Server</td>
                     <td>@a.Monitor</td>
@@ -53,11 +61,11 @@ else
                     <td>
                         @if (a.Suppressed)
                         {
-                            <button class="btn btn-small" @onclick="() => Unsuppress(a.Key)">Unsuppress</button>
+                            <button type="button" class="btn btn-small" @onclick="() => Unsuppress(a)">@AlertLabels.Action("Unsuppress", a, _filtered)</button>
                         }
                         else
                         {
-                            <button class="btn btn-small btn-warn" @onclick="() => Suppress(a.Key)">Suppress</button>
+                            <button type="button" class="btn btn-small btn-warn" @onclick="() => Suppress(a)">@AlertLabels.Action("Suppress", a, _filtered)</button>
                         }
                     </td>
                 </tr>
@@ -68,7 +76,7 @@ else
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -76,6 +84,12 @@ else
     private List<AlertView> _filtered = new();
     private string _filter = "all";
     private string? _flash;
+
+    private string Filter
+    {
+        get => _filter;
+        set { _filter = string.IsNullOrEmpty(value) ? "all" : value; ApplyFilter(); }
+    }
 
     protected override void OnInitialized() => Refresh();
     protected override void OnParametersSet() => ApplyFilter();
@@ -97,15 +111,17 @@ else
         };
     }
 
-    private void Suppress(string key)
+    private void Suppress(AlertView alert)
     {
-        if (State.Suppress(key)) { _flash = $"Suppressed {key[..8]}…"; Refresh(); }
-        else _flash = $"Could not suppress {key[..8]}";
+        var subject = AlertLabels.Subject(alert);
+        if (State.Suppress(alert.Key)) { _flash = $"Suppressed {subject}"; Refresh(); }
+        else _flash = $"Could not suppress {subject}. It is not in the current alerts or captures.";
     }
 
-    private void Unsuppress(string key)
+    private void Unsuppress(AlertView alert)
     {
-        if (State.Unsuppress(key)) { _flash = $"Unsuppressed {key[..8]}…"; Refresh(); }
-        else _flash = $"Could not unsuppress {key[..8]}";
+        var subject = AlertLabels.Subject(alert);
+        if (State.Unsuppress(alert.Key)) { _flash = $"Unsuppressed {subject}"; Refresh(); }
+        else _flash = $"Could not unsuppress {subject}. It is not in the current alerts or captures.";
     }
 }

@@ -26,8 +26,8 @@ else
     <section class="form-section">
         <h2>Logging</h2>
         <div class="form-row">
-            <label>Log level</label>
-            <select @bind="_logLevel">
+            <label for="settings-log-level">Log level</label>
+            <select id="settings-log-level" @bind="_logLevel">
                 <option value="DEBUG">DEBUG</option>
                 <option value="INFO">INFO</option>
                 <option value="WARNING">WARNING</option>
@@ -35,47 +35,47 @@ else
             </select>
         </div>
         <div class="form-row">
-            <label>Log file path</label>
-            <input type="text" @bind="_logFile" />
+            <label for="settings-log-file">Log file path</label>
+            <input id="settings-log-file" type="text" @bind="_logFile" />
         </div>
         <div class="form-row">
-            <label>Rotation: keep N daily files</label>
-            <input type="number" min="1" max="365" @bind="_rotationKeep" />
+            <label for="settings-rotation-keep">Rotation: keep N daily files</label>
+            <input id="settings-rotation-keep" type="number" min="1" max="365" @bind="_rotationKeep" />
         </div>
         <div class="form-row">
             <label><input type="checkbox" @bind="_logConsole" /> Also log to console (stderr)</label>
         </div>
         <div class="form-row">
-            <label>Disk free space warning threshold (%)</label>
-            <input type="number" min="0" max="100" @bind="_diskWarnPct" />
+            <label for="settings-disk-warn">Disk free space warning threshold (%)</label>
+            <input id="settings-disk-warn" type="number" min="0" max="100" @bind="_diskWarnPct" />
         </div>
     </section>
 
     <section class="form-section">
         <h2>HTTP / API Tuning</h2>
         <div class="form-row">
-            <label>Request timeout (seconds)</label>
-            <input type="number" min="5" max="300" @bind="_timeoutSeconds" />
+            <label for="settings-timeout">Request timeout (seconds)</label>
+            <input id="settings-timeout" type="number" min="5" max="300" @bind="_timeoutSeconds" />
         </div>
         <div class="form-row">
-            <label>Retry count</label>
-            <input type="number" min="0" max="10" @bind="_retryCount" />
+            <label for="settings-retry-count">Retry count</label>
+            <input id="settings-retry-count" type="number" min="0" max="10" @bind="_retryCount" />
         </div>
         <div class="form-row">
-            <label>Retry delay (seconds)</label>
-            <input type="number" min="1" max="60" @bind="_retryDelay" />
+            <label for="settings-retry-delay">Retry delay (seconds)</label>
+            <input id="settings-retry-delay" type="number" min="1" max="60" @bind="_retryDelay" />
         </div>
         <div class="form-row">
-            <label>API page size</label>
-            <input type="number" min="10" max="5000" @bind="_pageSize" />
+            <label for="settings-page-size">API page size</label>
+            <input id="settings-page-size" type="number" min="10" max="5000" @bind="_pageSize" />
         </div>
         <div class="form-row">
-            <label>Max pages (circuit breaker)</label>
-            <input type="number" min="1" max="10000" @bind="_maxPages" />
+            <label for="settings-max-pages">Max pages (circuit breaker)</label>
+            <input id="settings-max-pages" type="number" min="1" max="10000" @bind="_maxPages" />
         </div>
         <div class="form-row">
-            <label>Session timeout — /api/v1/sessions (seconds) <span class="muted">raise for very large deployments</span></label>
-            <input type="number" min="30" max="3600" @bind="_sessionTimeoutSeconds" />
+            <label for="settings-session-timeout">Session timeout — /api/v1/sessions (seconds) <span class="muted">raise for very large deployments</span></label>
+            <input id="settings-session-timeout" type="number" min="30" max="3600" @bind="_sessionTimeoutSeconds" />
         </div>
     </section>
 
@@ -88,7 +88,7 @@ else
     </section>
 
     <div class="form-actions">
-        <button class="btn" @onclick="SaveAll">Save Settings</button>
+        <button type="button" class="btn" @onclick="SaveAll">Save Settings</button>
     </div>
 
     @if (_unmappedGlobal.Count > 0)
@@ -102,7 +102,7 @@ else
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -204,13 +204,11 @@ else
         Load();
     }
 
-    private static int ToInt(object? v, int dflt) => v switch
+    private static int ToInt(object? v, int dflt)
     {
-        int i => i,
-        double d => (int)d,
-        string s when int.TryParse(s, out var i) => i,
-        _ => dflt,
-    };
+        try { return v is null ? dflt : Convert.ToInt32(v, System.Globalization.CultureInfo.InvariantCulture); }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException) { return dflt; }
+    }
 
     private static bool ToBool(object? v, bool dflt) => v switch
     {

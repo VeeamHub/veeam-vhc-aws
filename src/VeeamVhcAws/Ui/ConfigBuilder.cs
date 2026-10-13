@@ -13,7 +13,7 @@ public class WizardServer
     public string Url { get; set; } = "";
     public string Username { get; set; } = "";
     public string Password { get; set; } = "";
-    public bool VerifySsl { get; set; } = false;
+    public bool VerifySsl { get; set; } = true;
 }
 
 /// <summary>

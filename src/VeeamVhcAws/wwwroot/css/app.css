@@ -253,6 +253,12 @@ h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
     border: 1px solid var(--sev-crit-fg);
 }
 
+.status-banner.pending {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+}
+
 /* Card grid */
 .card-grid {
     display: grid;
@@ -460,6 +466,7 @@ h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
 
 .form-row input[type=text],
 .form-row input[type=password],
+.form-row input[type=number],
 .form-row select {
     background: var(--bg-elev);
     color: var(--text);
@@ -472,14 +479,31 @@ h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
 
 .form-row input[type=text]:focus,
 .form-row input[type=password]:focus,
+.form-row input[type=number]:focus,
 .form-row select:focus {
     outline: none;
     border-color: var(--accent);
 }
 
-.form-row input[type=text]:disabled {
+.form-row input[type=text]:disabled,
+.form-row input[type=password]:disabled,
+.form-row input[type=number]:disabled,
+.form-row select:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+fieldset.form-row {
+    border: 0;
+    padding: 0;
+    margin: 0 0 1rem;
+    min-inline-size: 0;
+}
+
+fieldset.form-row > legend {
+    font-weight: 500;
+    padding: 0;
+    margin-bottom: 0.35rem;
 }
 
 .radio-group {

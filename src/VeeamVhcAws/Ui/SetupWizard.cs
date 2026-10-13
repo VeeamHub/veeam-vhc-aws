@@ -85,7 +85,7 @@ public static class SetupWizard
                 new TextPrompt<string>("Password:")
                     .Secret());
 
-            var verifySsl = AnsiConsole.Confirm("Verify SSL certificate?", false);
+            var verifySsl = AnsiConsole.Confirm("Verify SSL certificate?", true);
 
             servers.Add(new WizardServer
             {

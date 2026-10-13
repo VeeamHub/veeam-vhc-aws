@@ -14,9 +14,9 @@
 else
 {
     <div class="tab-nav">
-        <button class="tab @(_activeTab == "repo" ? "active" : "")" @onclick='() => _activeTab = "repo"'>Repo Health</button>
-        <button class="tab @(_activeTab == "retention" ? "active" : "")" @onclick='() => _activeTab = "retention"'>Retention</button>
-        <button class="tab @(_activeTab == "worker" ? "active" : "")" @onclick='() => _activeTab = "worker"'>Worker Health</button>
+        <button type="button" class="tab @(_activeTab == "repo" ? "active" : "")" @onclick='() => _activeTab = "repo"'>Repo Health</button>
+        <button type="button" class="tab @(_activeTab == "retention" ? "active" : "")" @onclick='() => _activeTab = "retention"'>Retention</button>
+        <button type="button" class="tab @(_activeTab == "worker" ? "active" : "")" @onclick='() => _activeTab = "worker"'>Worker Health</button>
     </div>
 
     @if (_activeTab == "repo")
@@ -27,12 +27,12 @@ else
                 <label><input type="checkbox" @bind="_repoEnabled" /> Enabled</label>
             </div>
             <div class="form-row">
-                <label>Free space warning threshold (% free)</label>
-                <input type="number" min="0" max="100" @bind="_freeWarnPct" />
+                <label for="thresh-free-warn">Free space warning threshold (% free)</label>
+                <input id="thresh-free-warn" type="number" min="0" max="100" @bind="_freeWarnPct" />
             </div>
             <div class="form-row">
-                <label>Free space critical threshold (% free)</label>
-                <input type="number" min="0" max="100" @bind="_freeCritPct" />
+                <label for="thresh-free-crit">Free space critical threshold (% free)</label>
+                <input id="thresh-free-crit" type="number" min="0" max="100" @bind="_freeCritPct" />
             </div>
             <div class="form-row">
                 <label><input type="checkbox" @bind="_includeExternalRepos" /> Include external repositories</label>
@@ -41,15 +41,15 @@ else
                 <label><input type="checkbox" @bind="_checkExternalMaintenance" /> Check external maintenance sessions</label>
             </div>
             <div class="form-row">
-                <label>Session lookback (hours)</label>
-                <input type="number" min="1" max="720" @bind="_repoLookback" />
+                <label for="thresh-repo-lookback">Session lookback (hours)</label>
+                <input id="thresh-repo-lookback" type="number" min="1" max="720" @bind="_repoLookback" />
             </div>
             <div class="form-row">
-                <label>Lookback overlap (minutes)</label>
-                <input type="number" min="0" max="60" @bind="_repoOverlap" />
+                <label for="thresh-repo-overlap">Lookback overlap (minutes)</label>
+                <input id="thresh-repo-overlap" type="number" min="0" max="60" @bind="_repoOverlap" />
             </div>
             <div class="form-actions">
-                <button class="btn" @onclick="SaveRepo">Save Repo Health</button>
+                <button type="button" class="btn" @onclick="SaveRepo">Save Repo Health</button>
             </div>
         </section>
     }
@@ -61,26 +61,26 @@ else
                 <label><input type="checkbox" @bind="_retentionEnabled" /> Enabled</label>
             </div>
             <div class="form-row">
-                <label>Overage multiplier <span class="muted">(restore points beyond policy × this = warning)</span></label>
-                <input type="number" min="1" max="10" step="0.1" @bind="_overageMultiplier" />
+                <label for="thresh-overage">Overage multiplier <span class="muted">(restore points beyond policy × this = warning)</span></label>
+                <input id="thresh-overage" type="number" min="1" max="10" step="0.1" @bind="_overageMultiplier" />
             </div>
             <div class="form-row">
-                <label>Max-age multiplier <span class="muted">(age beyond policy × this = warning)</span></label>
-                <input type="number" min="1" max="10" step="0.1" @bind="_maxAgeMultiplier" />
+                <label for="thresh-max-age">Max-age multiplier <span class="muted">(age beyond policy × this = warning)</span></label>
+                <input id="thresh-max-age" type="number" min="1" max="10" step="0.1" @bind="_maxAgeMultiplier" />
             </div>
             <div class="form-row">
                 <label><input type="checkbox" @bind="_orphanDetection" /> Enable orphan backup detection</label>
             </div>
             <div class="form-row">
-                <label>Session lookback (hours)</label>
-                <input type="number" min="1" max="720" @bind="_retentionLookback" />
+                <label for="thresh-retention-lookback">Session lookback (hours)</label>
+                <input id="thresh-retention-lookback" type="number" min="1" max="720" @bind="_retentionLookback" />
             </div>
             <div class="form-row">
-                <label>Excluded backups <span class="muted">(comma-separated names)</span></label>
-                <input type="text" @bind="_excludeBackups" placeholder="backup-archive-2023, snapshot-old" />
+                <label for="thresh-exclude">Excluded backups <span class="muted">(comma-separated names)</span></label>
+                <input id="thresh-exclude" type="text" @bind="_excludeBackups" placeholder="backup-archive-2023, snapshot-old" />
             </div>
             <div class="form-actions">
-                <button class="btn" @onclick="SaveRetention">Save Retention</button>
+                <button type="button" class="btn" @onclick="SaveRetention">Save Retention</button>
             </div>
         </section>
     }
@@ -92,32 +92,32 @@ else
                 <label><input type="checkbox" @bind="_workerEnabled" /> Enabled</label>
             </div>
             <div class="form-row">
-                <label>Session lookback (hours)</label>
-                <input type="number" min="1" max="720" @bind="_workerLookback" />
+                <label for="thresh-worker-lookback">Session lookback (hours)</label>
+                <input id="thresh-worker-lookback" type="number" min="1" max="720" @bind="_workerLookback" />
             </div>
             <div class="form-row">
-                <label>Session failure rate — warning threshold</label>
-                <input type="number" min="0" max="1" step="0.05" @bind="_failureWarn" />
+                <label for="thresh-failure-warn">Session failure rate — warning threshold</label>
+                <input id="thresh-failure-warn" type="number" min="0" max="1" step="0.05" @bind="_failureWarn" />
                 <span class="muted">e.g. 0.1 = warn if &gt;10% sessions failed</span>
             </div>
             <div class="form-row">
-                <label>Session failure rate — critical threshold</label>
-                <input type="number" min="0" max="1" step="0.05" @bind="_failureCrit" />
+                <label for="thresh-failure-crit">Session failure rate — critical threshold</label>
+                <input id="thresh-failure-crit" type="number" min="0" max="1" step="0.05" @bind="_failureCrit" />
                 <span class="muted">e.g. 0.3 = critical if &gt;30% sessions failed</span>
             </div>
             <div class="form-row">
-                <label>Retention session — max failures before warn</label>
-                <input type="number" min="0" @bind="_retentionMaxFailures" />
+                <label for="thresh-retention-failures">Retention session — max failures before warn</label>
+                <input id="thresh-retention-failures" type="number" min="0" @bind="_retentionMaxFailures" />
             </div>
             <div class="form-row">
                 <label><input type="checkbox" @bind="_zeroDeletedWarn" /> Warn if retention session deletes 0 items</label>
             </div>
             <div class="form-row">
-                <label>Recurring failure threshold</label>
-                <input type="number" min="1" @bind="_recurringThreshold" />
+                <label for="thresh-recurring">Recurring failure threshold</label>
+                <input id="thresh-recurring" type="number" min="1" @bind="_recurringThreshold" />
             </div>
             <div class="form-actions">
-                <button class="btn" @onclick="SaveWorker">Save Worker Health</button>
+                <button type="button" class="btn" @onclick="SaveWorker">Save Worker Health</button>
             </div>
         </section>
     }
@@ -125,7 +125,7 @@ else
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -263,21 +263,17 @@ else
         _cfg = Config.Load();
     }
 
-    private static int ToInt(object? v, int dflt) => v switch
+    private static int ToInt(object? v, int dflt)
     {
-        int i => i,
-        double d => (int)d,
-        string s when int.TryParse(s, out var i) => i,
-        _ => dflt,
-    };
+        try { return v is null ? dflt : Convert.ToInt32(v, System.Globalization.CultureInfo.InvariantCulture); }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException) { return dflt; }
+    }
 
-    private static double ToDouble(object? v, double dflt) => v switch
+    private static double ToDouble(object? v, double dflt)
     {
-        double d => d,
-        int i => i,
-        string s when double.TryParse(s, out var d) => d,
-        _ => dflt,
-    };
+        try { return v is null ? dflt : Convert.ToDouble(v, System.Globalization.CultureInfo.InvariantCulture); }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException) { return dflt; }
+    }
 
     private static bool ToBool(object? v, bool dflt) => v switch
     {
