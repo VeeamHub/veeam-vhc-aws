@@ -24,6 +24,7 @@ printf 'export DOTNET_ROOT=%s\nexport PATH="$DOTNET_ROOT:$PATH"\nexport DOTNET_C
 export PATH="$DOTNET_ROOT:$PATH"
 dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
 dotnet restore tests/VeeamVhcAws.Tests/VeeamVhcAws.Tests.csproj
+dotnet restore tests/VeeamVhcAws.UiTests/VeeamVhcAws.UiTests.csproj
 
 if [ -f .cursor/skills/verify-veeam-vhc-aws/scripts/package-lock.json ]; then
   npm ci --omit=dev --prefix .cursor/skills/verify-veeam-vhc-aws/scripts

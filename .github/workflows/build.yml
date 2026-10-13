@@ -26,6 +26,9 @@ jobs:
       - name: Test
         run: dotnet test tests/VeeamVhcAws.Tests/VeeamVhcAws.Tests.csproj -c Release -v normal
 
+      - name: Test admin UI
+        run: dotnet test tests/VeeamVhcAws.UiTests/VeeamVhcAws.UiTests.csproj -c Release -v normal
+
   build-exe:
     name: Build win-x64 & VT Scan
     runs-on: ubuntu-latest
