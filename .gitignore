@@ -1,3 +1,6 @@
+# Verification helper dependencies
+.cursor/skills/verify-veeam-vhc-aws/scripts/node_modules/
+
 # Python (archived — kept for reference branch)
 __pycache__/
 *.pyc
