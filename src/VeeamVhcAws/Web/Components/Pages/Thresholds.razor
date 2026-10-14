@@ -201,7 +201,7 @@ else
 
     private void SaveRepo()
     {
-        var section = new Dictionary<string, object>
+        var section = ConfigService.OverlaySection(_cfg?.RepoHealth ?? new(), new Dictionary<string, object>
         {
             ["enabled"] = _repoEnabled,
             ["thresholds"] = new Dictionary<string, object>
@@ -213,7 +213,7 @@ else
             ["check_external_maintenance"] = _checkExternalMaintenance,
             ["session_lookback_hours"] = _repoLookback,
             ["lookback_overlap_minutes"] = _repoOverlap,
-        };
+        });
         Config.SaveMonitorSection("repo_health", section);
         _flash = "Repo Health thresholds saved";
         _cfg = Config.Load();
@@ -221,7 +221,11 @@ else
 
     private void SaveRetention()
     {
-        var section = new Dictionary<string, object>
+        var excludes = _excludeBackups
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Cast<object>()
+            .ToList();
+        var section = ConfigService.OverlaySection(_cfg?.Retention ?? new(), new Dictionary<string, object>
         {
             ["enabled"] = _retentionEnabled,
             ["thresholds"] = new Dictionary<string, object>
@@ -231,12 +235,8 @@ else
                 ["orphan_detection"] = _orphanDetection,
             },
             ["session_lookback_hours"] = _retentionLookback,
-        };
-        var excludes = _excludeBackups
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Cast<object>()
-            .ToList();
-        if (excludes.Count > 0) section["exclude_backups"] = excludes;
+            ["exclude_backups"] = excludes,
+        });
 
         Config.SaveMonitorSection("retention", section);
         _flash = "Retention thresholds saved";
@@ -245,7 +245,7 @@ else
 
     private void SaveWorker()
     {
-        var section = new Dictionary<string, object>
+        var section = ConfigService.OverlaySection(_cfg?.WorkerHealth ?? new(), new Dictionary<string, object>
         {
             ["enabled"] = _workerEnabled,
             ["lookback_hours"] = _workerLookback,
@@ -257,7 +257,7 @@ else
                 ["zero_deleted_items_warning"] = _zeroDeletedWarn,
                 ["recurring_failure_threshold"] = _recurringThreshold,
             },
-        };
+        });
         Config.SaveMonitorSection("worker_health", section);
         _flash = "Worker Health thresholds saved";
         _cfg = Config.Load();

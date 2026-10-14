@@ -112,11 +112,11 @@ public class RetentionMonitorTests
     public void TestDaysOverage()
     {
         var now = DateTime.UtcNow;
-        // 8 restore points with quantity=5, threshold = 5 * 1.5 = 7 → 8 > 7 triggers warning
+        // Oldest point is 14 days. quantity 5 * max_age_multiplier 1.5 = 7.5 days allowed.
         var rps = Enumerable.Range(0, 8).Select(i => new Dictionary<string, object>
         {
             ["id"] = $"rp-{i}", ["backupId"] = "backup-002", ["name"] = "vm-db-01",
-            ["creationTime"] = now.AddDays(-i).ToString("O")
+            ["creationTime"] = now.AddDays(-i * 2).ToString("O")
         }).ToList();
 
         var client = Substitute.For<IVbrClient>();

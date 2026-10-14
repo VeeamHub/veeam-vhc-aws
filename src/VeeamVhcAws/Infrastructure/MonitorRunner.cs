@@ -191,11 +191,14 @@ public static class MonitorRunner
         return applicable;
     }
 
-    // Returns true when every non-metric, non-Ok finding is a connection error, meaning
-    // no real data was returned and retrying subsequent monitors would only waste time.
+    // Skip later monitors only when this result has no data findings, just connection errors.
     private static bool IsServerUnreachable(MonitorResult result, string serverName)
     {
         if (result.Errors.Count == 0)
+            return false;
+
+        var connectionResource = $"[{serverName}] connection";
+        if (result.Findings.Any(f => f.Resource != connectionResource))
             return false;
 
         var actionableFindings = result.Findings
@@ -203,7 +206,7 @@ public static class MonitorRunner
             .ToList();
 
         return actionableFindings.Count > 0
-            && actionableFindings.All(f => f.Resource == $"[{serverName}] connection");
+            && actionableFindings.All(f => f.Resource == connectionResource);
     }
 
     private static void PrefixFindings(MonitorResult result, string serverName)
