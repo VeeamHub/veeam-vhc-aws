@@ -40,6 +40,55 @@ public class ThresholdsPageTests
     }
 
     [Fact]
+    public void RetentionSave_KeepsYamlOnlyExcludeJobs()
+    {
+        using var ui = new UiHarness();
+        File.WriteAllText(ui.ConfigPath, """
+            retention:
+              enabled: true
+              exclude_jobs:
+                - noisy-job
+              exclude_backups:
+                - old-backup
+              thresholds:
+                overage_multiplier: 1.5
+                max_age_multiplier: 1.5
+                orphan_detection: true
+              session_lookback_hours: 24
+            """);
+        var cut = ui.Context.RenderComponent<Thresholds>();
+        UiHarness.Click(cut, "Retention");
+        UiHarness.Click(cut, "Save Retention");
+
+        var yaml = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("noisy-job", yaml);
+        Assert.Contains("old-backup", yaml);
+    }
+
+    [Fact]
+    public void WorkerSave_KeepsPerJobSessions()
+    {
+        using var ui = new UiHarness();
+        File.WriteAllText(ui.ConfigPath, """
+            worker_health:
+              enabled: true
+              lookback_hours: 24
+              per_job_sessions: true
+              thresholds:
+                session_failure_rate_warning: 0.1
+                session_failure_rate_critical: 0.3
+                retention_session_max_failures: 1
+                zero_deleted_items_warning: true
+                recurring_failure_threshold: 3
+            """);
+        var cut = ui.Context.RenderComponent<Thresholds>();
+        UiHarness.Click(cut, "Worker Health");
+        UiHarness.Click(cut, "Save Worker Health");
+
+        Assert.Contains("per_job_sessions: true", File.ReadAllText(ui.ConfigPath));
+    }
+
+    [Fact]
     public void WorkerTab_NamesFailureFields()
     {
         using var ui = new UiHarness();

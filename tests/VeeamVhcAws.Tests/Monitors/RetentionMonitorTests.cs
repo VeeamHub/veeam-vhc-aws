@@ -149,6 +149,77 @@ public class RetentionMonitorTests
     }
 
     [Fact]
+    public void DaysPolicy_IgnoresPointCountInsideTheAgeWindow()
+    {
+        var now = DateTime.UtcNow;
+        var rps = Enumerable.Range(0, 30).Select(i => new Dictionary<string, object>
+        {
+            ["id"] = $"rp-{i}", ["backupId"] = "backup-days", ["name"] = "vm-hourly",
+            ["creationTime"] = now.AddHours(-i).ToString("O")
+        }).ToList();
+
+        var client = DaysClient(rps, quantity: 7);
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RetentionMonitor(DefaultConfig(new()
+        {
+            ["orphan_detection"] = false,
+            ["max_age_multiplier"] = 1.5,
+        }));
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.DoesNotContain(result.Findings, f =>
+            f.Severity is Severity.Warning or Severity.Critical &&
+            f.Message.Contains("overage", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void DaysPolicy_WarnsWhenOldestPointExceedsQuantityTimesMultiplier()
+    {
+        var now = DateTime.UtcNow;
+        var rps = new List<Dictionary<string, object>>
+        {
+            new() { ["id"] = "rp-new", ["backupId"] = "backup-days", ["name"] = "vm-daily",
+                ["creationTime"] = now.AddDays(-1).ToString("O") },
+            new() { ["id"] = "rp-old", ["backupId"] = "backup-days", ["name"] = "vm-daily",
+                ["creationTime"] = now.AddDays(-8).ToString("O") },
+        };
+
+        var client = DaysClient(rps, quantity: 5);
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RetentionMonitor(DefaultConfig(new()
+        {
+            ["orphan_detection"] = false,
+            ["max_age_multiplier"] = 1.0,
+        }));
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Contains(result.Findings, f =>
+            f.Severity is Severity.Warning or Severity.Critical &&
+            f.Message.Contains("overage", StringComparison.OrdinalIgnoreCase) &&
+            f.Message.Contains("days", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IVbrClient DaysClient(List<Dictionary<string, object>> rps, int quantity)
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetJobs().Returns(new List<Dictionary<string, object>>
+        {
+            new() { ["id"] = "job-days", ["name"] = "Daily",
+                ["storage"] = new Dictionary<string, object> {
+                    ["retentionPolicy"] = new Dictionary<string, object> { ["type"] = "days", ["quantity"] = (long)quantity },
+                    ["gfsPolicy"] = new Dictionary<string, object> { ["isEnabled"] = false }
+                } }
+        });
+        client.GetBackups().Returns(new List<Dictionary<string, object>>
+        {
+            new() { ["id"] = "backup-days", ["jobId"] = "job-days", ["name"] = "Daily" }
+        });
+        client.GetRestorePoints(Arg.Any<int>(), Arg.Any<int>()).Returns(call =>
+            call.ArgAt<int>(1) == 0 ? rps : new List<Dictionary<string, object>>());
+        return client;
+    }
+
+    [Fact]
     public void TestOrphanDetection()
     {
         var now = DateTime.UtcNow;
