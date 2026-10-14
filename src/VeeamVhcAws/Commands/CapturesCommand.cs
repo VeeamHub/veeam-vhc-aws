@@ -1,6 +1,5 @@
 using System.CommandLine;
 using System.Text.Json;
-using Serilog;
 using Spectre.Console;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
@@ -10,8 +9,6 @@ namespace VeeamVhcAws.Commands;
 
 public static class CapturesCommand
 {
-    private static readonly ILogger Logger = Log.ForContext(typeof(CapturesCommand));
-
     public static Command Create()
     {
         var command = new Command("captures", "View and manage captured errors and suppressions");
@@ -199,14 +196,7 @@ public static class CapturesCommand
     private static string GetStatePath(string? configArg)
     {
         var configPath = ConfigLoader.GetConfigPath(configArg);
-        if (!File.Exists(configPath))
-        {
-            Logger.Debug("Config not found at {Path}, using default state path", configPath);
-            return "./veeam-vhc-aws-state.json";
-        }
-
-        var config = ConfigLoader.LoadConfig(configPath);
-        return config.GetSection("global").Get("state_file", "./veeam-vhc-aws-state.json");
+        return ConfigLoader.ResolveStateFile(configPath);
     }
 
     private static Dictionary<string, object>? LoadState(string? configArg)
