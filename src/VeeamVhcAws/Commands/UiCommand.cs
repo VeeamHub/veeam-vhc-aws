@@ -129,8 +129,52 @@ public static class UiCommand
     {
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(path, token);
+
+        var ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+        };
+        if (!OperatingSystem.IsWindows())
+            options.UnixCreateMode = ownerOnly;
+
+        using (var stream = new FileStream(path, options))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(token);
+        }
+
+        if (OperatingSystem.IsWindows())
+            RestrictWindowsTokenAcl(path);
+        else
+            File.SetUnixFileMode(path, ownerOnly);
     }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+
+    private static void RestrictWindowsTokenAcl(string path)
+    {
+        var user = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+        var args = string.Join(' ',
+            QuoteIcacls(path),
+            "/inheritance:r",
+            "/grant:r",
+            QuoteIcacls($"{user}:(R,W)"),
+            QuoteIcacls(@"NT AUTHORITY\SYSTEM:(R,W)"),
+            QuoteIcacls(@"BUILTIN\Administrators:(R,W)"));
+        using var proc = Process.Start(new ProcessStartInfo
+        {
+            FileName = "icacls",
+            Arguments = args,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        });
+        proc?.WaitForExit(5000);
+    }
+
+    private static string QuoteIcacls(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 
     private static void OpenBrowser(string url)
     {
