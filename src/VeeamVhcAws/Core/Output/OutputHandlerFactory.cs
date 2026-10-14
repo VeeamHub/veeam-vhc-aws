@@ -37,7 +37,8 @@ public static class OutputHandlerFactory
     {
         if (cfg.TryGetValue("to_addrs", out var val))
         {
-            if (val is string s) return new List<string> { s };
+            if (val is string s)
+                return s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
             if (val is List<object> list) return list.Select(x => x.ToString() ?? "").ToList();
             if (val is List<string> sList) return sList;
         }

@@ -100,24 +100,27 @@ public static class ConfigBuilder
             outputs.Add(new Dictionary<string, object> { ["type"] = "prometheus", ["port"] = 9101 });
 
         if (answers.IncludeSlack && !string.IsNullOrEmpty(answers.SlackWebhookUrl))
-            outputs.Add(new Dictionary<string, object> { ["type"] = "webhook", ["url"] = answers.SlackWebhookUrl, ["format"] = "slack" });
+            outputs.Add(new Dictionary<string, object> { ["type"] = "webhook", ["url"] = answers.SlackWebhookUrl, ["template"] = "slack" });
 
         if (answers.IncludeTeams && !string.IsNullOrEmpty(answers.TeamsWebhookUrl))
-            outputs.Add(new Dictionary<string, object> { ["type"] = "webhook", ["url"] = answers.TeamsWebhookUrl, ["format"] = "teams" });
+            outputs.Add(new Dictionary<string, object> { ["type"] = "webhook", ["url"] = answers.TeamsWebhookUrl, ["template"] = "teams" });
 
         if (answers.IncludeNtfy && !string.IsNullOrEmpty(answers.NtfyUrl))
-            outputs.Add(new Dictionary<string, object> { ["type"] = "webhook", ["url"] = answers.NtfyUrl, ["format"] = "ntfy" });
+            outputs.Add(new Dictionary<string, object> { ["type"] = "webhook", ["url"] = answers.NtfyUrl, ["template"] = "ntfy" });
 
         if (answers.IncludeEmail && !string.IsNullOrEmpty(answers.EmailSmtpHost))
         {
+            var recipients = answers.EmailTo
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
             var emailOutput = new Dictionary<string, object>
             {
                 ["type"] = "email",
                 ["smtp_host"] = answers.EmailSmtpHost,
                 ["smtp_port"] = answers.EmailSmtpPort,
-                ["from"] = answers.EmailFrom,
-                ["to"] = answers.EmailTo,
-                ["use_tls"] = false,
+                ["from_addr"] = answers.EmailFrom,
+                ["to_addrs"] = recipients,
+                ["use_tls"] = true,
             };
             if (!string.IsNullOrEmpty(answers.EmailSmtpUsername))
             {
