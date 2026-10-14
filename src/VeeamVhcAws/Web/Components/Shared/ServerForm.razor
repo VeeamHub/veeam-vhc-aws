@@ -1,5 +1,5 @@
 @code {
-    [Parameter, EditorRequired] public ServerEdit Model { get; set; } = new("", "vbr", "", "", "", false, false, "1.3-rev1");
+    [Parameter, EditorRequired] public ServerEdit Model { get; set; } = new("", "vbr", "", "", "", false, true, "1.3-rev1");
     [Parameter] public EventCallback<ServerEdit> OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public bool IsNew { get; set; }
@@ -68,65 +68,61 @@
     }
 }
 
-<div class="modal-overlay" @onclick="OnCancel">
-    <div class="modal" @onclick:stopPropagation="true">
-        <h2>@(IsNew ? "Add Server" : $"Edit {Model.Name}")</h2>
+<DialogShell Title="@(IsNew ? "Add Server" : $"Edit {Model.Name}")" TitleId="server-dialog-title" OnCancel="OnCancel">
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="form-error" role="alert">@_error</div>
+    }
 
-        @if (!string.IsNullOrEmpty(_error))
-        {
-            <div class="form-error">@_error</div>
-        }
-
-        <div class="form-row">
-            <label>Name <span class="muted">(unique label)</span></label>
-            <input type="text" value="@_name" @oninput="OnNameInput" placeholder="e.g. prod-vbr" disabled="@(!IsNew)" />
-        </div>
-
-        <div class="form-row">
-            <label>Type</label>
-            <div class="radio-group">
-                <label><input type="radio" name="type" value="vbr" checked="@(_type == "vbr")" @onchange="@(() => _type = "vbr")" /> VBR (Veeam Backup &amp; Replication)</label>
-                <label><input type="radio" name="type" value="vbaws" checked="@(_type == "vbaws")" @onchange="@(() => _type = "vbaws")" /> VBAWS (Veeam Backup for AWS)</label>
-            </div>
-        </div>
-
-        <div class="form-row">
-            <label>URL</label>
-            <input type="text" @bind="_url" @bind:event="oninput" placeholder="https://server:9419" />
-        </div>
-
-        <div class="form-row">
-            <label>Username</label>
-            <input type="text" @bind="_username" @bind:event="oninput" placeholder="DOMAIN\\backupadmin or admin" />
-        </div>
-
-        <div class="form-row">
-            <label>Password</label>
-            <input type="password" value="@_password" @oninput="OnPasswordInput" />
-            @if (!IsNew && !_passwordChanged)
-            {
-                <span class="muted">(unchanged — leave as-is to keep existing)</span>
-            }
-        </div>
-
-        <div class="form-row">
-            <label><input type="checkbox" @bind="_verifySsl" /> Verify SSL certificate</label>
-        </div>
-
-        @if (_type == "vbr")
-        {
-            <div class="form-row">
-                <label>API Version</label>
-                <select @bind="_apiVersion">
-                    <option value="1.3-rev1">1.3-rev1 (VBR 13+)</option>
-                    <option value="1.1-rev2">1.1-rev2 (VBR 12.3 and earlier)</option>
-                </select>
-            </div>
-        }
-
-        <div class="form-actions">
-            <button class="btn-secondary" @onclick="OnCancel">Cancel</button>
-            <button class="btn" @onclick="Save">Save</button>
-        </div>
+    <div class="form-row">
+        <label for="server-name">Name <span class="muted">(unique label)</span></label>
+        <input id="server-name" type="text" value="@_name" @oninput="OnNameInput" placeholder="e.g. prod-vbr" disabled="@(!IsNew)" autocomplete="off" />
     </div>
-</div>
+
+    <fieldset class="form-row">
+        <legend>Type</legend>
+        <div class="radio-group">
+            <label><input type="radio" name="server-type" value="vbr" checked="@(_type == "vbr")" @onchange="@(() => _type = "vbr")" /> VBR (Veeam Backup &amp; Replication)</label>
+            <label><input type="radio" name="server-type" value="vbaws" checked="@(_type == "vbaws")" @onchange="@(() => _type = "vbaws")" /> VBAWS (Veeam Backup for AWS)</label>
+        </div>
+    </fieldset>
+
+    <div class="form-row">
+        <label for="server-url">URL</label>
+        <input id="server-url" type="text" @bind="_url" @bind:event="oninput" placeholder="https://server:9419" autocomplete="off" />
+    </div>
+
+    <div class="form-row">
+        <label for="server-username">Username</label>
+        <input id="server-username" type="text" @bind="_username" @bind:event="oninput" placeholder="DOMAIN\\backupadmin or admin" autocomplete="username" />
+    </div>
+
+    <div class="form-row">
+        <label for="server-password">Password</label>
+        <input id="server-password" type="password" value="@_password" @oninput="OnPasswordInput" autocomplete="@(IsNew ? "new-password" : "current-password")" />
+        @if (!IsNew && !_passwordChanged)
+        {
+            <span class="muted">(unchanged — leave as-is to keep existing)</span>
+        }
+    </div>
+
+    <div class="form-row">
+        <label><input type="checkbox" @bind="_verifySsl" /> Verify SSL certificate</label>
+    </div>
+
+    @if (_type == "vbr")
+    {
+        <div class="form-row">
+            <label for="server-api-version">API Version</label>
+            <select id="server-api-version" @bind="_apiVersion">
+                <option value="1.3-rev1">1.3-rev1 (VBR 13+)</option>
+                <option value="1.1-rev2">1.1-rev2 (VBR 12.3 and earlier)</option>
+            </select>
+        </div>
+    }
+
+    <div class="form-actions">
+        <button type="button" class="btn-secondary" @onclick="OnCancel">Cancel</button>
+        <button type="button" class="btn" @onclick="Save">Save</button>
+    </div>
+</DialogShell>

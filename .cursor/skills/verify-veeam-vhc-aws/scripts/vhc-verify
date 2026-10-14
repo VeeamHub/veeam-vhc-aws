@@ -89,6 +89,7 @@ CONFIG=$(printf '%q' "$CONFIG")
 DATA_DIR=$(printf '%q' "$DATA_DIR")
 EVIDENCE_DIR=$(printf '%q' "$EVIDENCE_DIR")
 REPO=$(printf '%q' "$REPO")
+STATE_PATH=$(printf '%q' "$STATE_PATH")
 BIND=127.0.0.1
 EOF
 }
@@ -174,6 +175,7 @@ cmd_launch() {
   CONFIG=$config
   DATA_DIR="$dir/data"
   EVIDENCE_DIR="$ROOT/evidence/$id"
+  STATE_PATH="$REPO/src/VeeamVhcAws/veeam-vhc-aws-state.json"
   write_meta
   if [ -z "${VHC_VERIFY_RUN_ID:-}" ]; then
     printf '%s\n' "$id" >"$LATEST"
@@ -194,6 +196,7 @@ cmd_launch() {
         echo "run $id"
         echo "config $config"
         echo "evidence $EVIDENCE_DIR"
+        echo "state $STATE_PATH"
         echo "log $log"
         rm -f /tmp/vhc-healthz-"$id"
         return 0
@@ -221,6 +224,15 @@ cmd_doctor() {
   note "config=$CONFIG"
   note "data=$DATA_DIR"
   note "evidence=$EVIDENCE_DIR"
+  if [ -z "${STATE_PATH:-}" ]; then
+    STATE_PATH="$REPO/src/VeeamVhcAws/veeam-vhc-aws-state.json"
+  fi
+  note "state=$STATE_PATH"
+  if [ -f "$STATE_PATH" ]; then
+    note "stateExists=true"
+  else
+    note "stateExists=false"
+  fi
   if [ -f "$CONFIG" ]; then
     note "configExists=true"
   else
@@ -379,15 +391,15 @@ cmd_browser() {
       browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"wait-hidden","text":sys.argv[1]}))' "$1")"
       ;;
     wait-value)
-      local label="" value=""
+      local label="" value="" saw_value=0
       while [ $# -gt 0 ]; do
         case "$1" in
           --label) label=$2; shift 2 ;;
-          --value) value=$2; shift 2 ;;
+          --value) value=$2; saw_value=1; shift 2 ;;
           *) die "unknown wait-value arg $1" ;;
         esac
       done
-      [ -n "$label" ] && [ -n "$value" ] || die "usage: vhc-verify browser wait-value --label URL --value https://lab-vbr:9419"
+      [ -n "$label" ] && [ "$saw_value" -eq 1 ] || die "usage: vhc-verify browser wait-value --label URL --value https://lab-vbr:9419"
       browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"wait-value","label":sys.argv[1],"value":sys.argv[2]}))' "$label" "$value")"
       ;;
     assert-text)
@@ -428,13 +440,14 @@ cmd_browser() {
 
 cmd_assert_server() {
   load_meta
-  local name="" url="" username="" secret=""
+  local name="" url="" username="" secret="" verify=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --name) name=$2; shift 2 ;;
       --url) url=$2; shift 2 ;;
       --username) username=$2; shift 2 ;;
       --password-absent) secret=$2; shift 2 ;;
+      --verify-ssl) verify=$2; shift 2 ;;
       *) die "unknown assert-server arg $1" ;;
     esac
   done
@@ -443,14 +456,16 @@ cmd_assert_server() {
   [ -f "$CONFIG" ] || die "config file was not created at $CONFIG"
   mkdir -p "$EVIDENCE_DIR/servers"
   cp "$CONFIG" "$EVIDENCE_DIR/servers/config.yaml"
-  python3 - "$CONFIG" "$name" "$url" "$username" "$secret" <<'PY'
+  python3 - "$CONFIG" "$name" "$url" "$username" "$secret" "$verify" <<'PY'
 import sys
-path, name, url, username, secret = sys.argv[1:6]
+path, name, url, username, secret, verify = sys.argv[1:7]
 text = open(path, encoding="utf-8").read()
 errors = []
 for needle in (name, url, username, "ENC:"):
     if needle not in text:
         errors.append(f"missing {needle}")
+if verify in ("true", "false") and f"verify_ssl: {verify}" not in text:
+    errors.append(f"missing verify_ssl: {verify}")
 if secret in text:
     errors.append("plaintext password is in the config file")
 if errors:

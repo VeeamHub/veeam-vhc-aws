@@ -52,7 +52,8 @@ public class StateService
     {
         var root = LoadRoot();
         var captured = AsDict(root.GetValueOrDefault("captured_errors"));
-        if (!captured.ContainsKey(key)) return false;
+        var findings = AsDict(root.GetValueOrDefault("findings"));
+        if (!captured.ContainsKey(key) && !findings.ContainsKey(key)) return false;
 
         var suppressions = AsDict(root.GetValueOrDefault("suppressions"));
         suppressions[key] = new Dictionary<string, object>
@@ -60,6 +61,8 @@ public class StateService
             ["suppressed_at"] = DateTime.UtcNow.ToString("o"),
         };
         root["suppressions"] = suppressions;
+        if (MarkCaptured(captured, key, suppressed: true))
+            root["captured_errors"] = captured;
         Save(root);
         return true;
     }
@@ -68,9 +71,25 @@ public class StateService
     {
         var root = LoadRoot();
         var suppressions = AsDict(root.GetValueOrDefault("suppressions"));
-        if (!suppressions.Remove(key)) return false;
+        var removed = suppressions.Remove(key);
+        var captured = AsDict(root.GetValueOrDefault("captured_errors"));
+        var cleared = MarkCaptured(captured, key, suppressed: false);
+        if (!removed && !cleared) return false;
+
         root["suppressions"] = suppressions;
+        if (cleared)
+            root["captured_errors"] = captured;
         Save(root);
+        return true;
+    }
+
+    private static bool MarkCaptured(Dictionary<string, object> captured, string key, bool suppressed)
+    {
+        if (captured.GetValueOrDefault(key) is not Dictionary<string, object> entry)
+            return false;
+        if (entry.GetValueOrDefault("suppressed") is bool current && current == suppressed)
+            return false;
+        entry["suppressed"] = suppressed;
         return true;
     }
 
@@ -164,7 +183,7 @@ public class StateService
     }
 
     private static DateTime? TryParseDate(object? value) =>
-        value is string s && DateTime.TryParse(s, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt)
+        value is string s && !string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt)
             ? dt
             : null;
 

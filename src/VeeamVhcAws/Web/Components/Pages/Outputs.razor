@@ -6,7 +6,10 @@
 
 <div class="page-header">
     <h1>Output Handlers</h1>
-    <button class="btn" @onclick="AddOutput">+ Add Output</button>
+    @if (_cfg is not null && _cfg.Outputs.Count > 0)
+    {
+        <button type="button" class="btn" @onclick="AddOutput">+ Add Output</button>
+    }
 </div>
 
 <p class="muted">Notification channels for monitor findings. Multiple handlers can be configured — all fire on every run.</p>
@@ -19,7 +22,7 @@ else if (_cfg.Outputs.Count == 0)
 {
     <div class="empty">
         <p>No output handlers configured.</p>
-        <button class="btn" @onclick="AddOutput">+ Add Your First Handler</button>
+        <button type="button" class="btn" @onclick="AddOutput">+ Add Your First Handler</button>
     </div>
 }
 else
@@ -40,8 +43,8 @@ else
                     <td>@(o.Fields.GetValueOrDefault("min_severity") as string ?? "—")</td>
                     <td class="muted">@FormatRemaining(o)</td>
                     <td>
-                        <button class="btn btn-small" @onclick="() => EditOutput(idx)">Edit</button>
-                        <button class="btn btn-small btn-warn" @onclick="() => ConfirmDelete(idx)">Delete</button>
+                        <button type="button" class="btn btn-small" @onclick="() => EditOutput(idx)">Edit @($"{o.Type} {idx + 1}")</button>
+                        <button type="button" class="btn btn-small btn-warn" @onclick="() => ConfirmDelete(idx)">Delete @($"{o.Type} {idx + 1}")</button>
                     </td>
                 </tr>
             }
@@ -54,23 +57,16 @@ else
     <OutputForm Model="_editing" IsNew="_isNew" OnSave="SaveOutput" OnCancel="CancelEdit" />
 }
 
-@if (_confirmingDeleteIdx is not null)
+@if (_confirmingDeleteIdx is not null && _cfg is not null)
 {
-    <div class="modal-overlay" @onclick="() => _confirmingDeleteIdx = null">
-        <div class="modal" @onclick:stopPropagation="true">
-            <h2>Delete output handler?</h2>
-            <p>Remove handler #@(_confirmingDeleteIdx + 1) (<strong>@_cfg!.Outputs[_confirmingDeleteIdx.Value].Type</strong>)?</p>
-            <div class="form-actions">
-                <button class="btn-secondary" @onclick="() => _confirmingDeleteIdx = null">Cancel</button>
-                <button class="btn btn-warn" @onclick="ConfirmDeleteAction">Delete</button>
-            </div>
-        </div>
-    </div>
+    <ConfirmDialog Title="Delete output handler?" OnConfirm="ConfirmDeleteAction" OnCancel="CancelDelete">
+        <p>Remove handler #@(_confirmingDeleteIdx + 1) (<strong>@_cfg.Outputs[_confirmingDeleteIdx.Value].Type</strong>)?</p>
+    </ConfirmDialog>
 }
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -86,6 +82,7 @@ else
 
     private void AddOutput()
     {
+        _confirmingDeleteIdx = null;
         _editing = new OutputView("webhook", new());
         _editingIdx = null;
         _isNew = true;
@@ -122,7 +119,14 @@ else
         Refresh();
     }
 
-    private void ConfirmDelete(int idx) => _confirmingDeleteIdx = idx;
+    private void ConfirmDelete(int idx)
+    {
+        _editing = null;
+        _editingIdx = null;
+        _confirmingDeleteIdx = idx;
+    }
+
+    private void CancelDelete() => _confirmingDeleteIdx = null;
 
     private void ConfirmDeleteAction()
     {

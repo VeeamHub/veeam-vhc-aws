@@ -6,7 +6,10 @@
 
 <div class="page-header">
     <h1>Servers</h1>
-    <button class="btn" @onclick="AddServer">+ Add Server</button>
+    @if (_cfg is not null && _cfg.Servers.Count > 0)
+    {
+        <button type="button" class="btn" @onclick="AddServer">+ Add Server</button>
+    }
 </div>
 
 @if (_cfg is not null)
@@ -28,7 +31,7 @@ else if (_cfg.Servers.Count == 0)
 {
     <div class="empty">
         <p>No servers configured yet.</p>
-        <button class="btn" @onclick="AddServer">+ Add Your First Server</button>
+        <button type="button" class="btn" @onclick="AddServer">+ Add Your First Server</button>
     </div>
 }
 else
@@ -56,8 +59,8 @@ else
                     <td>@(s.VerifySsl ? "yes" : "no")</td>
                     <td>@(string.IsNullOrEmpty(s.ApiVersion) ? "—" : s.ApiVersion)</td>
                     <td>
-                        <button class="btn btn-small" @onclick="() => EditServer(s)">Edit</button>
-                        <button class="btn btn-small btn-warn" @onclick="() => DeleteServer(s.Name)">Delete</button>
+                        <button type="button" class="btn btn-small" @onclick="() => EditServer(s)">Edit @s.Name</button>
+                        <button type="button" class="btn btn-small btn-warn" @onclick="() => DeleteServer(s.Name)">Delete @s.Name</button>
                     </td>
                 </tr>
             }
@@ -72,21 +75,14 @@ else
 
 @if (_confirmingDelete is not null)
 {
-    <div class="modal-overlay" @onclick="() => _confirmingDelete = null">
-        <div class="modal" @onclick:stopPropagation="true">
-            <h2>Delete server?</h2>
-            <p>Are you sure you want to delete <strong>@_confirmingDelete</strong>? This cannot be undone via the UI (you can re-add it manually).</p>
-            <div class="form-actions">
-                <button class="btn-secondary" @onclick="() => _confirmingDelete = null">Cancel</button>
-                <button class="btn btn-warn" @onclick="ConfirmDelete">Delete</button>
-            </div>
-        </div>
-    </div>
+    <ConfirmDialog Title="Delete server?" OnConfirm="ConfirmDelete" OnCancel="CancelDelete">
+        <p>Are you sure you want to delete <strong>@_confirmingDelete</strong>? This cannot be undone via the UI (you can re-add it manually).</p>
+    </ConfirmDialog>
 }
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -102,7 +98,7 @@ else
 
     private void AddServer()
     {
-        _editing = new ServerEdit("", "vbr", "", "", "", true, false, "1.3-rev1");
+        _editing = new ServerEdit("", "vbr", "", "", "", true, true, "1.3-rev1");
         _isNew = true;
     }
 
@@ -140,7 +136,13 @@ else
         Refresh();
     }
 
-    private void DeleteServer(string name) => _confirmingDelete = name;
+    private void DeleteServer(string name)
+    {
+        _editing = null;
+        _confirmingDelete = name;
+    }
+
+    private void CancelDelete() => _confirmingDelete = null;
 
     private void ConfirmDelete()
     {

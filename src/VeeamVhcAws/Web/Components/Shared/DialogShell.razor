@@ -1,0 +1,27 @@
+<div class="modal-overlay" @onclick="OnBackdropClick">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="@TitleId" tabindex="-1"
+         @ref="_dialog" @onkeydown="OnKey">
+        <h2 id="@TitleId">@Title</h2>
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public string TitleId { get; set; } = "";
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private ElementReference _dialog;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await _dialog.FocusAsync();
+    }
+
+    private Task OnKey(KeyboardEventArgs e) =>
+        e.Key == "Escape" ? OnCancel.InvokeAsync() : Task.CompletedTask;
+
+    private void OnBackdropClick() { }
+}

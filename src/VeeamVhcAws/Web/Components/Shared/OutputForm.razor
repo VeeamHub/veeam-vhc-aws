@@ -76,6 +76,12 @@
         _changedSecrets.Add(key);
     }
 
+    private string PasswordValue(string key)
+    {
+        if (_changedSecrets.Contains(key)) return Get(key);
+        return IsNew ? "" : "********";
+    }
+
     private async Task Save()
     {
         _error = null;
@@ -90,18 +96,16 @@
     }
 }
 
-<div class="modal-overlay" @onclick="OnCancel">
-    <div class="modal" @onclick:stopPropagation="true">
-        <h2>@(IsNew ? "Add Output Handler" : $"Edit {_type}")</h2>
+<DialogShell Title="@(IsNew ? "Add Output Handler" : $"Edit {_type}")" TitleId="output-dialog-title" OnCancel="OnCancel">
 
         @if (!string.IsNullOrEmpty(_error))
         {
-            <div class="form-error">@_error</div>
+            <div class="form-error" role="alert">@_error</div>
         }
 
         <div class="form-row">
-            <label>Type</label>
-            <select value="@_type" @onchange="OnTypeChange" disabled="@(!IsNew)">
+            <label for="output-type">Type</label>
+            <select id="output-type" value="@_type" @onchange="OnTypeChange" disabled="@(!IsNew)">
                 <option value="webhook">Webhook (Slack/Teams/ntfy/PagerDuty)</option>
                 <option value="email">Email (SMTP)</option>
                 <option value="prometheus">Prometheus</option>
@@ -113,12 +117,12 @@
         @if (_type == "webhook")
         {
             <div class="form-row">
-                <label>URL</label>
-                <input type="text" value="@Get("url")" @oninput="@(e => SetString("url", e))" placeholder="https://hooks.slack.com/…" />
+                <label for="output-url">URL</label>
+                <input id="output-url" type="text" value="@Get("url")" @oninput="@(e => SetString("url", e))" placeholder="https://hooks.slack.com/…" />
             </div>
             <div class="form-row">
-                <label>Template</label>
-                <select value="@Get("template")" @onchange="@(e => SetString("template", e))">
+                <label for="output-template">Template</label>
+                <select id="output-template" value="@Get("template")" @onchange="@(e => SetString("template", e))">
                     <option value="generic">Generic</option>
                     <option value="slack">Slack</option>
                     <option value="teams">Microsoft Teams</option>
@@ -127,8 +131,8 @@
                 </select>
             </div>
             <div class="form-row">
-                <label>Min Severity</label>
-                <select value="@Get("min_severity")" @onchange="@(e => SetString("min_severity", e))">
+                <label for="output-min-severity">Min Severity</label>
+                <select id="output-min-severity" value="@Get("min_severity")" @onchange="@(e => SetString("min_severity", e))">
                     <option value="ok">OK</option>
                     <option value="warning">Warning</option>
                     <option value="critical">Critical</option>
@@ -141,37 +145,37 @@
         else if (_type == "email")
         {
             <div class="form-row">
-                <label>SMTP host</label>
-                <input type="text" value="@Get("smtp_host")" @oninput="@(e => SetString("smtp_host", e))" placeholder="smtp.office365.com" />
+                <label for="output-smtp-host">SMTP host</label>
+                <input id="output-smtp-host" type="text" value="@Get("smtp_host")" @oninput="@(e => SetString("smtp_host", e))" placeholder="smtp.office365.com" />
             </div>
             <div class="form-row">
-                <label>SMTP port</label>
-                <input type="text" value="@GetInt("smtp_port", 587)" @oninput="@(e => SetInt("smtp_port", e, 587))" />
+                <label for="output-smtp-port">SMTP port</label>
+                <input id="output-smtp-port" type="text" value="@GetInt("smtp_port", 587)" @oninput="@(e => SetInt("smtp_port", e, 587))" />
             </div>
             <div class="form-row">
-                <label>From address</label>
-                <input type="text" value="@Get("from_addr")" @oninput="@(e => SetString("from_addr", e))" placeholder="veeam-vhc-aws@example.com" />
+                <label for="output-from">From address</label>
+                <input id="output-from" type="text" value="@Get("from_addr")" @oninput="@(e => SetString("from_addr", e))" placeholder="veeam-vhc-aws@example.com" />
             </div>
             <div class="form-row">
-                <label>To addresses <span class="muted">(comma-separated)</span></label>
-                <input type="text" value="@Get("to_addrs")" @oninput="@(e => SetString("to_addrs", e))" placeholder="oncall@example.com, ops@example.com" />
+                <label for="output-to">To addresses <span class="muted">(comma-separated)</span></label>
+                <input id="output-to" type="text" value="@Get("to_addrs")" @oninput="@(e => SetString("to_addrs", e))" placeholder="oncall@example.com, ops@example.com" />
             </div>
             <div class="form-row">
-                <label>Min Severity</label>
-                <select value="@Get("min_severity")" @onchange="@(e => SetString("min_severity", e))">
+                <label for="output-min-severity">Min Severity</label>
+                <select id="output-min-severity" value="@Get("min_severity")" @onchange="@(e => SetString("min_severity", e))">
                     <option value="ok">OK</option>
                     <option value="warning">Warning</option>
                     <option value="critical">Critical</option>
                 </select>
             </div>
             <div class="form-row">
-                <label>SMTP username <span class="muted">(optional)</span></label>
-                <input type="text" value="@Get("smtp_username")" @oninput="@(e => SetString("smtp_username", e))" />
+                <label for="output-smtp-username">SMTP username <span class="muted">(optional)</span></label>
+                <input id="output-smtp-username" type="text" value="@Get("smtp_username")" @oninput="@(e => SetString("smtp_username", e))" autocomplete="username" />
             </div>
             <div class="form-row">
-                <label>SMTP password</label>
-                <input type="password" value="@(_changedSecrets.Contains("smtp_password") ? Get("smtp_password") : "********")"
-                       @oninput="@(e => SetSecret("smtp_password", e))" />
+                <label for="output-smtp-password">SMTP password</label>
+                <input id="output-smtp-password" type="password" value="@PasswordValue("smtp_password")"
+                       autocomplete="new-password" @oninput="@(e => SetSecret("smtp_password", e))" />
                 @if (!IsNew && !_changedSecrets.Contains("smtp_password"))
                 {
                     <span class="muted">(unchanged — leave as-is to keep existing)</span>
@@ -184,37 +188,37 @@
         else if (_type == "prometheus")
         {
             <div class="form-row">
-                <label>Mode</label>
-                <select value="@Get("mode")" @onchange="@(e => SetString("mode", e))">
+                <label for="output-mode">Mode</label>
+                <select id="output-mode" value="@Get("mode")" @onchange="@(e => SetString("mode", e))">
                     <option value="pushgateway">Pushgateway (push metrics out)</option>
                     <option value="server">Server (expose /metrics endpoint)</option>
                 </select>
             </div>
             <div class="form-row">
-                <label>Pushgateway URL</label>
-                <input type="text" value="@Get("url")" @oninput="@(e => SetString("url", e))" placeholder="localhost:9091" />
+                <label for="output-url">Pushgateway URL</label>
+                <input id="output-url" type="text" value="@Get("url")" @oninput="@(e => SetString("url", e))" placeholder="localhost:9091" />
             </div>
             <div class="form-row">
-                <label>Job label</label>
-                <input type="text" value="@Get("job")" @oninput="@(e => SetString("job", e))" />
+                <label for="output-job">Job label</label>
+                <input id="output-job" type="text" value="@Get("job")" @oninput="@(e => SetString("job", e))" />
             </div>
             <div class="form-row">
-                <label>Server port</label>
-                <input type="text" value="@GetInt("port", 9100)" @oninput="@(e => SetInt("port", e, 9100))" />
+                <label for="output-port">Server port</label>
+                <input id="output-port" type="text" value="@GetInt("port", 9100)" @oninput="@(e => SetInt("port", e, 9100))" />
             </div>
         }
         else if (_type == "json_file")
         {
             <div class="form-row">
-                <label>File path</label>
-                <input type="text" value="@Get("path")" @oninput="@(e => SetString("path", e))" placeholder="./veeam-vhc-aws-output.json" />
+                <label for="output-path">File path</label>
+                <input id="output-path" type="text" value="@Get("path")" @oninput="@(e => SetString("path", e))" placeholder="./veeam-vhc-aws-output.json" />
             </div>
             <div class="form-row">
                 <label><input type="checkbox" checked="@GetBool("rotate")" @onchange="@(e => SetBool("rotate", e))" /> Rotate file daily</label>
             </div>
             <div class="form-row">
-                <label>Max rotated files</label>
-                <input type="text" value="@GetInt("max_files", 30)" @oninput="@(e => SetInt("max_files", e, 30))" />
+                <label for="output-max-files">Max rotated files</label>
+                <input id="output-max-files" type="text" value="@GetInt("max_files", 30)" @oninput="@(e => SetInt("max_files", e, 30))" />
             </div>
         }
         else if (_type == "json_stdout")
@@ -223,8 +227,7 @@
         }
 
         <div class="form-actions">
-            <button class="btn-secondary" @onclick="OnCancel">Cancel</button>
-            <button class="btn" @onclick="Save">Save</button>
+            <button type="button" class="btn-secondary" @onclick="OnCancel">Cancel</button>
+            <button type="button" class="btn" @onclick="Save">Save</button>
         </div>
-    </div>
-</div>
+</DialogShell>

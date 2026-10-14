@@ -49,6 +49,8 @@
     <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="MailKit" Version="4.16.0" />
+    <!-- MimeKit depends on Pkcs >= 10.0.0, which restores 10.0.0. Pin the patched release. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageReference Include="prometheus-net" Version="8.2.1" />
   </ItemGroup>
 
