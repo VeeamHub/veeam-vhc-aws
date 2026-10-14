@@ -20,10 +20,10 @@ Preconditions:
 - `vhc-verify doctor` prints `doctor=ok`.
 - The config file may be missing. The first save creates it.
 
-- **Open the page.** The heading is Global Settings. **Log level** is a select. **Log file path** is a text box. The checkbox label is `Also log to console (stderr)`. Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser goto /settings` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-heading "Global Settings"`.
-- **Change two fields.** Set **Log level** to `INFO`. Set **Log file path** to `./ops.log`. Choose **Save Settings**. The flash says `Settings saved`. Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser select --label "Log level" --value INFO` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser fill --label "Log file path" --value ./ops.log` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Save Settings"`.
+- **Open the page.** The heading is Global Settings. **Log level** is a select. **Log file path** is a text box. The checkbox label is `Also log to console (stderr)`. Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser goto /settings` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-heading "Global Settings"`.
+- **Change two fields.** Set **Log level** to `INFO`. Set **Log file path** to `./ops.log`. Choose **Save Settings**. The flash says `Settings saved`. Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser select --label "Log level" --value INFO` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser fill --label "Log file path" --value ./ops.log` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Save Settings"`.
 - **Reload.** Open `/settings` again. **Log level** is `INFO` and **Log file path** is `./ops.log`. The yaml contains both.
-- **Proof.** Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser screenshot --path "$EVIDENCE/settings/saved.png"` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser snapshot --path "$EVIDENCE/settings/saved.aria.txt"`.
+- **Proof.** Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser screenshot --path "$EVIDENCE/settings/saved.png"` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser snapshot --path "$EVIDENCE/settings/saved.aria.txt"`.
 
 ## Gotchas
 

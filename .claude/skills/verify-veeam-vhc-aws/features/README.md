@@ -4,7 +4,7 @@ This directory is the maintained source for verifying the web admin UI. Read thi
 
 ## Baseline preconditions
 
-- Launch with `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify launch` so the UI starts from an empty data directory.
+- Launch with `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify launch` so the UI starts from an empty data directory.
 - Require `doctor=ok` before the first click.
 - Drive only the run this helper started. A second run needs its own `VHC_VERIFY_RUN_ID`.
 - The checked-out app is the one under test. Do not point `-c` at an operator's real `veeam-vhc-aws.yaml`.
