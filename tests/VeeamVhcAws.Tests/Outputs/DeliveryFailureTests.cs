@@ -12,6 +12,7 @@ using VeeamVhcAws.Outputs;
 
 namespace VeeamVhcAws.Tests.Outputs;
 
+[Collection("console")]
 public class DeliveryFailureTests
 {
     [Fact]
@@ -94,7 +95,7 @@ public class DeliveryFailureTests
             Assert.False(email.ContainsKey("from"));
             Assert.False(email.ContainsKey("to"));
 
-            var handler = Assert.IsType<EmailHandler>(OutputHandlerFactory.CreateHandlers(loaded).Single(h => h is EmailHandler));
+            var handler = Assert.IsType<EmailHandler>(OutputHandlerFactory.CreateHandlers(loaded, path).Single(h => h is EmailHandler));
             var from = (string)typeof(EmailHandler).GetField("_fromAddr", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(handler)!;
             var to = (List<string>)typeof(EmailHandler).GetField("_toAddrs", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(handler)!;
             Assert.Equal("vhc@example", from);

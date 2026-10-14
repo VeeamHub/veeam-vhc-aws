@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using MailKit.Net.Smtp;
 using MimeKit;
@@ -74,7 +75,7 @@ public class EmailHandler : IOutputHandler
                 findingHtml.Append(
                     $"<li><span style=\"color:{fColor};font-weight:bold;\">" +
                     $"[{f.Severity.ToLowerString().ToUpperInvariant()}]</span> " +
-                    $"<strong>{f.Resource}</strong>: {BoldWorkloadsHtml(f.Message)}</li>");
+                    $"<strong>{WebUtility.HtmlEncode(f.Resource)}</strong>: {BoldWorkloadsHtml(WebUtility.HtmlEncode(f.Message))}</li>");
             }
 
             rows.Append($@"

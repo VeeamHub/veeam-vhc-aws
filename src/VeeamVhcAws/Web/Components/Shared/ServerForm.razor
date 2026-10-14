@@ -53,6 +53,11 @@
         if (string.IsNullOrWhiteSpace(_url))  { _error = "URL is required"; return; }
         if (!Uri.TryCreate(_url, UriKind.Absolute, out _)) { _error = "URL must be an absolute URL (e.g. https://host:9419)"; return; }
         if (string.IsNullOrWhiteSpace(_username)) { _error = "Username is required"; return; }
+        if (!IsNew && !_passwordChanged && !string.Equals(_url.Trim(), Model.Url, StringComparison.Ordinal))
+        {
+            _error = ConfigService.UrlChangeRequiresPassword;
+            return;
+        }
 
         var edit = new ServerEdit(
             Name: _name.Trim(),

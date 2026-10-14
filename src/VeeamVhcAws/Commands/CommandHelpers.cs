@@ -24,12 +24,12 @@ public static class CommandHelpers
         var configPath = ConfigLoader.GetConfigPath(configArg);
         SecretKeyStore.BindProcessDirectory(configPath);
         var config = ConfigLoader.LoadConfig(configPath);
-        LoggingSetup.Setup(config);
+        LoggingSetup.Setup(config, configPath);
         Logger.Information("veeam-vhc-aws starting (PID {ProcessId})", Environment.ProcessId);
 
         var servers = ServerContextBuilder.BuildAllServers(config);
         var patternEngine = BuildPatternEngine(config);
-        var handlers = OutputHandlerFactory.CreateHandlers(config);
+        var handlers = OutputHandlerFactory.CreateHandlers(config, configPath);
         var dispatcher = new OutputDispatcher(handlers);
         var stateFile = ConfigLoader.AnchorPath(configPath,
             config.GetSection("global").Get("state_file", "./veeam-vhc-aws-state.json"));

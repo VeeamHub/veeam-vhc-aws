@@ -116,6 +116,22 @@ public class ServersPageTests
         Assert.DoesNotContain("replaced.example", File.ReadAllText(ui.ConfigPath));
     }
 
+    [Fact]
+    public void EditUrl_WithoutANewPassword_IsRejected()
+    {
+        using var ui = new UiHarness();
+        var cut = ui.Context.RenderComponent<Servers>();
+        AddLab(cut);
+        UiHarness.Click(cut, "Edit lab-vbr");
+        cut.Find("#server-url").Input("https://lab-vbr.example:9420");
+        UiHarness.Click(cut, "Save");
+
+        Assert.Contains("A server URL change requires a new password.", cut.Markup);
+        var yaml = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("url: https://lab-vbr.example:9419", yaml);
+        Assert.DoesNotContain("9420", yaml);
+    }
+
     private static void AddLab(IRenderedFragment cut)
     {
         UiHarness.Click(cut, "+ Add Your First Server");

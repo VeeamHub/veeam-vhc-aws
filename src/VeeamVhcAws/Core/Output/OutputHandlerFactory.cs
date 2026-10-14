@@ -5,23 +5,25 @@ namespace VeeamVhcAws.Core.Output;
 
 public static class OutputHandlerFactory
 {
-    private static readonly Dictionary<string, Func<Dictionary<string, object>, IOutputHandler>> Registry = new()
+    private static readonly Dictionary<string, Func<Dictionary<string, object>, string, IOutputHandler>> Registry = new()
     {
-        ["json_file"] = cfg => new JsonFileHandler(
-            cfg.Get("path", "/var/log/veeam-vhc-aws.json"),
+        ["json_file"] = (cfg, configPath) => new JsonFileHandler(
+            ConfigPathJail.Resolve(configPath, cfg.Get("path", "/var/log/veeam-vhc-aws.json")),
             cfg.Get("rotate", false),
             cfg.Get("max_files", 30)),
-        ["webhook"] = cfg => new WebhookHandler(
+        ["webhook"] = (cfg, _) => new WebhookHandler(
             cfg.Get<string>("url", ""),
             cfg.Get("template", "generic"),
             cfg.Get("min_severity", "ok"),
-            cfg.Get("deduplicate", true)),
-        ["prometheus"] = cfg => new PrometheusHandler(
+            cfg.Get("deduplicate", true),
+            cfg.Get("allow_loopback", false)),
+        ["prometheus"] = (cfg, _) => new PrometheusHandler(
             cfg.Get("mode", "pushgateway"),
             cfg.Get<string?>("url", null),
             cfg.Get("job", "veeam_vhc_aws"),
-            cfg.Get("port", 9100)),
-        ["email"] = cfg => new EmailHandler(
+            cfg.Get("port", 9100),
+            cfg.Get("allow_loopback", false)),
+        ["email"] = (cfg, _) => new EmailHandler(
             cfg.Get("smtp_host", ""),
             cfg.Get("smtp_port", 587),
             cfg.Get("from_addr", ""),
@@ -44,7 +46,7 @@ public static class OutputHandlerFactory
         return new List<string>();
     }
 
-    public static List<IOutputHandler> CreateHandlers(Dictionary<string, object> config)
+    public static List<IOutputHandler> CreateHandlers(Dictionary<string, object> config, string configPath)
     {
         var outputConfigs = config.GetListOfSections("output");
         if (outputConfigs.Count == 0)
@@ -68,7 +70,7 @@ public static class OutputHandlerFactory
             if (!Registry.TryGetValue(handlerType, out var factory))
                 throw new InvalidOperationException($"Unknown output handler type: {handlerType}");
 
-            handlers.Add(factory(entry));
+            handlers.Add(factory(entry, configPath));
         }
         return handlers;
     }

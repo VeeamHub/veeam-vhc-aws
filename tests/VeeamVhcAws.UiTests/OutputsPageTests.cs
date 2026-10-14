@@ -101,4 +101,70 @@ public class OutputsPageTests
         Assert.Contains("to_addrs=ops@example.com, oncall@example.com", cut.Markup);
         Assert.DoesNotContain("List`1", cut.Markup);
     }
+
+    [Fact]
+    public void WebhookReload_ShowsTheMask_AndKeepsTheStoredUrl()
+    {
+        using var ui = new UiHarness(writeConfig: false);
+        var cut = ui.Context.RenderComponent<OutputsPage>();
+        UiHarness.Click(cut, "+ Add Your First Handler");
+        cut.Find("#output-url").Input("https://hooks.example/services/T123/SECRET");
+        cut.Find("#output-template").Change("ntfy");
+        UiHarness.Click(cut, "Save");
+
+        var again = ui.Context.RenderComponent<OutputsPage>();
+        Assert.Contains("********", again.Markup);
+        Assert.DoesNotContain("T123", again.Markup);
+        Assert.DoesNotContain("SECRET", again.Markup);
+        var yaml = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("https://hooks.example/services/T123/SECRET", yaml);
+
+        UiHarness.Click(again, "Edit webhook 1");
+        again.Find("#output-template").Change("slack");
+        UiHarness.Click(again, "Save");
+        var saved = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("https://hooks.example/services/T123/SECRET", saved);
+        Assert.Contains("slack", saved);
+        Assert.DoesNotContain("********", saved);
+    }
+
+    [Fact]
+    public void WebhookMask_SurvivesDeletingANeighbor_AndASameIndexSave()
+    {
+        using var ui = new UiHarness(writeConfig: false);
+        File.WriteAllText(ui.ConfigPath, """
+            output:
+              - type: json_stdout
+              - type: webhook
+                url: https://hooks.example/first
+                template: slack
+              - type: webhook
+                url: https://hooks.example/second
+                template: ntfy
+            """);
+        var cut = ui.Context.RenderComponent<OutputsPage>();
+        Assert.Contains("********", cut.Markup);
+        Assert.DoesNotContain("https://hooks.example/first", cut.Markup);
+        Assert.DoesNotContain("https://hooks.example/second", cut.Markup);
+
+        UiHarness.Click(cut, "Delete json_stdout 1");
+        UiHarness.Click(cut, "Confirm delete");
+        var afterStdout = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("https://hooks.example/first", afterStdout);
+        Assert.Contains("https://hooks.example/second", afterStdout);
+
+        UiHarness.Click(cut, "Delete webhook 1");
+        UiHarness.Click(cut, "Confirm delete");
+        var afterFirst = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("https://hooks.example/second", afterFirst);
+        Assert.DoesNotContain("https://hooks.example/first", afterFirst);
+
+        UiHarness.Click(cut, "Edit webhook 1");
+        cut.Find("#output-template").Change("generic");
+        UiHarness.Click(cut, "Save");
+        var saved = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("https://hooks.example/second", saved);
+        Assert.Contains("generic", saved);
+        Assert.DoesNotContain("********", saved);
+    }
 }

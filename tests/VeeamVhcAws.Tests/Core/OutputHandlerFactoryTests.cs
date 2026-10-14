@@ -22,7 +22,7 @@ public class OutputHandlerFactoryTests
                     ["to_addrs"] = "one@example, two@example",
                 }
             }
-        });
+        }, Path.GetTempPath());
 
         var email = Assert.IsType<EmailHandler>(Assert.Single(handlers));
         var recipients = (List<string>)typeof(EmailHandler)

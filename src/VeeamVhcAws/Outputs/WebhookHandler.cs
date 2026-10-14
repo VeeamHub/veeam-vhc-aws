@@ -22,14 +22,19 @@ public class WebhookHandler : IOutputHandler
     private readonly string _template;
     private readonly Severity _minSeverity;
     private readonly bool _deduplicate;
+    private readonly bool _allowLoopback;
+    private readonly List<string> _logs = new();
+
+    internal IReadOnlyList<string> Logs => _logs;
 
     public WebhookHandler(string url, string template = "generic",
-        string minSeverity = "ok", bool deduplicate = true)
+        string minSeverity = "ok", bool deduplicate = true, bool allowLoopback = false)
     {
         _url = url;
         _template = template.ToLowerInvariant();
         _minSeverity = SeverityExtensions.ParseSeverity(minSeverity);
         _deduplicate = deduplicate;
+        _allowLoopback = allowLoopback;
     }
 
     private bool ShouldSend(IReadOnlyList<MonitorResult> results)
@@ -504,7 +509,7 @@ public class WebhookHandler : IOutputHandler
 
         if (!isSummary && !ShouldSend(results))
         {
-            Logger.Information("Webhook skipped for {Url} — severity below threshold ({MinSeverity})", _url, _minSeverity);
+            Record($"Webhook skipped for {HostForLog(_url)} — severity below threshold ({_minSeverity})");
             return;
         }
 
@@ -544,14 +549,21 @@ public class WebhookHandler : IOutputHandler
 
             if (!hasNewAlerts && !hasResolved)
             {
-                Logger.Information("Webhook skipped for {Url} — no new or resolved findings (dedup)", _url);
+                Record($"Webhook skipped for {HostForLog(_url)} — no new or resolved findings (dedup)");
                 return;
             }
         }
 
+        var decision = OutboundUrlDecision.Decide(_url, _allowLoopback);
+        if (!decision.Allowed)
+        {
+            Record($"Webhook rejected for {decision.Host}: {decision.Reason}");
+            return;
+        }
+
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var client = OutboundUrlDecision.CreateClient();
             HttpResponseMessage response;
 
             if (_template == "ntfy")
@@ -577,12 +589,24 @@ public class WebhookHandler : IOutputHandler
             }
 
             response.EnsureSuccessStatusCode();
-            Logger.Information("Webhook sent to {Url} (template={Template}, status={StatusCode})",
-                _url, _template, (int)response.StatusCode);
+            Record($"Webhook sent to {HostForLog(_url)} (template={_template}, status={(int)response.StatusCode})");
         }
         catch (Exception e)
         {
-            Logger.Error("Webhook failed for {Url}: {Error}", _url, e.Message);
+            Record($"Webhook failed for {HostForLog(_url)}: {e.Message}");
         }
+    }
+
+    private void Record(string message)
+    {
+        _logs.Add(message);
+        Logger.Information("{WebhookLog}", message);
+    }
+
+    private static string HostForLog(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
+            return uri.Host;
+        return "invalid-webhook-host";
     }
 }

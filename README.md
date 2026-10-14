@@ -136,8 +136,9 @@ veeam-vhc-aws repo-health -c config.yaml
 veeam-vhc-aws retention -c config.yaml
 veeam-vhc-aws worker-health -c config.yaml
 
-# Prometheus HTTP server (long-running mode)
+# Prometheus HTTP server (long-running mode). Listens on 127.0.0.1 unless --bind is set.
 veeam-vhc-aws serve -c config.yaml --port 9100 --interval 300
+veeam-vhc-aws serve -c config.yaml --bind 10.1.2.3 --port 9100
 
 # Test connectivity to all configured servers (live spinners + actionable error hints)
 veeam-vhc-aws test-connection -c config.yaml
@@ -160,6 +161,8 @@ veeam-vhc-aws version
 # Suppress all interactive output (for use in scripts or CI)
 veeam-vhc-aws all -c config.yaml --no-interactive
 ```
+
+`veeam-vhc-aws serve` listens on 127.0.0.1 unless you set `--bind`. A prometheus output in server mode also listens on 127.0.0.1.
 
 ### Web Admin GUI
 
@@ -185,7 +188,7 @@ veeam-vhc-aws ui -c config.yaml --no-browser
 |---|---|
 | **Dashboard** | At-a-glance status banner, per-server health cards, last-run time, finding counts |
 | **Alerts** | Live table of active findings with severity badges. **Click [Suppress] to silence an alert.** Filter by severity/server, search by resource. Auto-refreshes every 5s. |
-| **Servers** | Add/edit/delete VBR and VBAWS servers via forms. Passwords are encrypted on save with a machine-local key and stored with an `ENC:` prefix. Existing values written by the old shared passphrase still decrypt. `encrypt-config` rewrites those legacy values. |
+| **Servers** | Add/edit/delete VBR and VBAWS servers via forms. Passwords are encrypted on save with a machine-local key and stored with an `ENC:` prefix. Existing values written by the old shared passphrase still decrypt. `encrypt-config` rewrites those legacy values. A server URL change requires the password again. |
 | **Outputs** | Add/edit/delete notification channels — webhook (Slack/Teams/ntfy/PagerDuty), email (SMTP), Prometheus, JSON file. Per-type form fields. |
 | **Thresholds** | Tabbed editor for per-monitor thresholds (Repo Health / Retention / Worker Health). |
 | **Captures** | Historical error log with filter (suppressed/unsuppressed). Same suppress/unsuppress controls as Alerts. |
@@ -193,7 +196,7 @@ veeam-vhc-aws ui -c config.yaml --no-browser
 
 **Authentication:**
 
-- **Localhost (default)** — `--bind 127.0.0.1`. No auth — accessible only from the same machine. RDP in, open browser, manage.
+- **Localhost (default)** — `--bind 127.0.0.1`. No auth — accessible only from the same machine. RDP in, open browser, manage. Pass `--require-token` to demand the token even on loopback.
 - **Remote** — `--bind 0.0.0.0` or specific IP. A 64-char token is auto-generated on first run and stored at `C:\ProgramData\VHC\ui-token.txt` (Windows) or `~/.vhc/ui-token.txt` (others). The file is readable only by its owner (and, on Windows, SYSTEM and Administrators). Token is appended to the URL on startup (`http://server:9101/?t=<token>`) and persisted in a cookie after first visit. The cookie is marked Secure when the request is HTTPS. Rotate with `veeam-vhc-aws ui --regen-token`. Sending the token over plain HTTP puts it in browser history and Referer headers.
 
 **Coexistence with the scheduled task:** The UI is purely an operator console — it reads the state file the scheduled task writes. You can run the UI continuously without affecting the every-5-minutes monitor task. Changes to `config.yaml` made via the UI are picked up by the next scheduled run automatically.
@@ -237,7 +240,7 @@ veeam-vhc-aws tracks finding state between runs so you only get notified when so
 | Problem disappears | `RESOLVED` notification fires |
 | Problem comes back later | Treated as new — alert fires again |
 
-State is stored in `veeam-vhc-aws-state.json`. A relative `global.state_file` is resolved from the directory that contains the config file, not from the process working directory. The Windows installer writes an absolute path under `C:\ProgramData\VHC\`. Deleting the state file resets all state. Every existing finding alerts again on the next run.
+State is stored in `veeam-vhc-aws-state.json`. A relative `global.state_file` is resolved from the directory that contains the config file, not from the process working directory. Log files, the state file, and JSON file output paths must stay inside that directory. The program rejects `..` and a symlink that points outside it. If the configured log file cannot be created, logging falls back to the local application data directory. Deleting the state file resets all state. Every existing finding alerts again on the next run.
 
 Deduplication is **on by default** for all output handlers. To disable it for a specific handler (e.g., to always send every alert regardless of state), add `deduplicate: false`:
 
@@ -383,6 +386,8 @@ The setup wizard configures notifications for you, but you can also edit the con
 
 Each handler supports `min_severity` to control when it fires (`ok`, `warning`, `critical`).
 
+Webhook and Pushgateway URLs cannot target link-local addresses, `169.254.169.254`, or a loopback host. Set `allow_loopback: true` on that output to allow loopback. Private RFC 1918 addresses stay allowed. Sends do not follow redirects.
+
 Example stacking multiple outputs:
 
 ```yaml
@@ -402,7 +407,7 @@ output:
 
 ### Logging
 
-Log files rotate daily. On Windows standalone installs, logs are written to `C:\ProgramData\VHC\logs\`. Key options:
+Log files rotate daily. A relative path stays in the directory that contains the config file. An absolute path is allowed in that directory, and also under `global.data_directory` when that key is set. `setup.ps1` sets `data_directory` to `C:\ProgramData\VHC` and puts the state file and logs under that directory. Key options:
 
 ```yaml
 global:

@@ -8,18 +8,13 @@ namespace VeeamVhcAws.Core.Logging;
 
 public static class LoggingSetup
 {
-    private static readonly string[] SensitivePatterns = new[]
-    {
-        "password", "Password", "access_token", "Authorization", "Bearer", "Basic"
-    };
-
-    public static void Setup(Dictionary<string, object> config)
+    public static void Setup(Dictionary<string, object> config, string configPath)
     {
         var globalCfg = config.GetSection("global");
         var logCfg = globalCfg.GetSection("logging");
 
         var levelName = logCfg.Get("level", "DEBUG").ToUpperInvariant();
-        var logFile = logCfg.Get("file", "./veeam-vhc-aws.log");
+        var logFile = ConfigPathJail.Resolve(configPath, logCfg.Get("file", "./veeam-vhc-aws.log"));
         var rotationKeep = logCfg.Get("rotation_keep", 30);
         var consoleEnabled = logCfg.Get("console", true);
         var diskWarningPct = logCfg.Get("disk_warning_pct", 20);
@@ -38,7 +33,7 @@ public static class LoggingSetup
             .MinimumLevel.Is(level)
             .Enrich.WithProperty("Application", "veeam-vhc-aws");
 
-        var chosen = ChooseWritableLogFile(logFile, out var primaryError);
+        var chosen = ChooseWritableLogFile(logFile, configPath, out var primaryError);
         if (chosen is not null)
             logConfig = AttachFileSink(logConfig, chosen, rotationKeep);
         else
@@ -63,21 +58,7 @@ public static class LoggingSetup
             CheckLogDiskSpace(chosen, diskWarningPct);
     }
 
-    internal static string? FallbackDirectoryOverride { get; set; }
-
-    internal static string FallbackLogFile()
-    {
-        var root = FallbackDirectoryOverride;
-        if (string.IsNullOrEmpty(root))
-        {
-            root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (string.IsNullOrEmpty(root))
-                root = Path.GetTempPath();
-        }
-        return Path.Combine(root, "VHC", "logs", "veeam-vhc-aws.log");
-    }
-
-    private static string? ChooseWritableLogFile(string configured, out string? primaryError)
+    private static string? ChooseWritableLogFile(string configured, string configPath, out string? primaryError)
     {
         if (TryPrepareFile(configured, out primaryError))
         {
@@ -85,10 +66,32 @@ public static class LoggingSetup
             return configured;
         }
 
-        var fallback = FallbackLogFile();
-        if (!PathsEqual(fallback, configured) && TryPrepareFile(fallback, out _))
-            return fallback;
+        foreach (var candidate in FallbackCandidates(configPath, configured))
+        {
+            if (TryPrepareFile(candidate, out _))
+                return candidate;
+        }
+
         return null;
+    }
+
+    private static IEnumerable<string> FallbackCandidates(string configPath, string configured)
+    {
+        foreach (var root in ConfigPathJail.AllowedRoots(configPath))
+        {
+            string resolved;
+            try
+            {
+                resolved = ConfigPathJail.Resolve(configPath, Path.Combine(root, "logs", "veeam-vhc-aws.log"));
+            }
+            catch (InvalidOperationException)
+            {
+                continue;
+            }
+
+            if (!PathsEqual(resolved, configured))
+                yield return resolved;
+        }
     }
 
     private static bool PathsEqual(string left, string right)
@@ -163,10 +166,8 @@ public static class LoggingSetup
             {
                 EventLog.WriteEntry("Application", message, type);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                var spare = Path.Combine(Path.GetTempPath(), "veeam-vhc-aws-eventlog.log");
-                File.AppendAllText(spare, message + Environment.NewLine + ex + Environment.NewLine);
             }
         }
     }
@@ -200,39 +201,5 @@ public static class LoggingSetup
         {
             // Best effort — don't block startup if drive info is unavailable
         }
-    }
-
-    public static string RedactSensitive(string message)
-    {
-        // Simple redaction for log output
-        var result = message;
-        foreach (var pattern in SensitivePatterns)
-        {
-            var idx = result.IndexOf(pattern, StringComparison.OrdinalIgnoreCase);
-            while (idx >= 0)
-            {
-                // Find the value after = or : or space
-                var valueStart = result.IndexOfAny(new[] { '=', ':', ' ' }, idx + pattern.Length);
-                if (valueStart >= 0 && valueStart < result.Length - 1)
-                {
-                    valueStart++;
-                    // Skip whitespace and quotes
-                    while (valueStart < result.Length && (result[valueStart] == ' ' || result[valueStart] == '"' || result[valueStart] == '\''))
-                        valueStart++;
-
-                    var valueEnd = valueStart;
-                    while (valueEnd < result.Length && result[valueEnd] != ' ' && result[valueEnd] != ',' &&
-                           result[valueEnd] != '"' && result[valueEnd] != '\'' && result[valueEnd] != '}' &&
-                           result[valueEnd] != ']')
-                        valueEnd++;
-
-                    if (valueEnd > valueStart)
-                        result = result[..valueStart] + "***REDACTED***" + result[valueEnd..];
-                }
-                idx = result.IndexOf(pattern, idx + pattern.Length + 14, StringComparison.OrdinalIgnoreCase);
-                if (idx < 0) break;
-            }
-        }
-        return result;
     }
 }

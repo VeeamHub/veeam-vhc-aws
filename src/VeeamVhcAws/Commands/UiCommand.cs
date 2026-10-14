@@ -18,21 +18,25 @@ public static class UiCommand
         var bindOption = new Option<string>("--bind", () => "127.0.0.1", "Address to bind (default: 127.0.0.1 = localhost-only)");
         var noBrowserOption = new Option<bool>("--no-browser", "Do not auto-open the browser");
         var regenTokenOption = new Option<bool>("--regen-token", "Regenerate the auth token and exit");
+        var requireTokenOption = new Option<bool>(
+            "--require-token",
+            "Require the auth token even when the bind address is loopback");
 
         command.AddOption(configOption);
         command.AddOption(portOption);
         command.AddOption(bindOption);
         command.AddOption(noBrowserOption);
         command.AddOption(regenTokenOption);
+        command.AddOption(requireTokenOption);
 
-        command.SetHandler(async (string? config, int port, string bind, bool noBrowser, bool regenToken) =>
+        command.SetHandler(async (string? config, int port, string bind, bool noBrowser, bool regenToken, bool requireToken) =>
         {
             var configPath = ConfigLoader.GetConfigPath(config);
             SecretKeyStore.BindProcessDirectory(configPath);
             if (File.Exists(configPath))
             {
                 var cfg = ConfigLoader.LoadConfig(configPath);
-                LoggingSetup.Setup(cfg);
+                LoggingSetup.Setup(cfg, configPath);
             }
             else if (TerminalCapabilities.IsInteractive)
             {
@@ -50,7 +54,7 @@ public static class UiCommand
             }
 
             var isLoopback = IsLoopback(bind);
-            var auth = BuildAuthOptions(isLoopback, tokenPath);
+            var auth = BuildAuthOptions(isLoopback, requireToken, tokenPath);
 
             var options = new WebHostOptions(configPath, bind, port);
             using var cts = new CancellationTokenSource();
@@ -89,7 +93,7 @@ public static class UiCommand
                 await WebHost.RunAsync(options, auth, cts.Token);
             }
             catch (OperationCanceledException) { /* clean shutdown */ }
-        }, configOption, portOption, bindOption, noBrowserOption, regenTokenOption);
+        }, configOption, portOption, bindOption, noBrowserOption, regenTokenOption, requireTokenOption);
 
         return command;
     }
@@ -105,9 +109,9 @@ public static class UiCommand
         return Path.Combine(dir, "ui-token.txt");
     }
 
-    private static AuthOptions BuildAuthOptions(bool isLoopback, string tokenPath)
+    internal static AuthOptions BuildAuthOptions(bool isLoopback, bool requireToken, string tokenPath)
     {
-        if (isLoopback)
+        if (isLoopback && !requireToken)
             return new AuthOptions { RequireToken = false, Token = "" };
 
         var token = ReadOrCreateToken(tokenPath);

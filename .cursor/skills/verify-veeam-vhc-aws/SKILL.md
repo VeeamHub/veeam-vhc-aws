@@ -39,7 +39,7 @@ dotnet run --project <repo>/src/VeeamVhcAws/VeeamVhcAws.csproj -- ui \
 
 Loopback has no auth token. Do not pass `--bind 0.0.0.0`. A non-loopback bind reads or creates `~/.vhc/ui-token.txt`, which is shared by every UI on the machine.
 
-The state file defaults to `./veeam-vhc-aws-state.json`, resolved from the process working directory. Under this helper that file is `<repo>/src/VeeamVhcAws/veeam-vhc-aws-state.json`. Launch prints it as `state`. The Settings page shows the same path. Pages read the file on each load, so you can write it after launch and reload. It is gitignored. Two UIs can run together only when each launch has its own `VHC_VERIFY_RUN_ID`, its own data directory, and its own port. Leave the variable unset for a single run. The helper records that run in `/tmp/vhc-verify/latest`.
+The state file defaults to `./veeam-vhc-aws-state.json`. That relative path is resolved beside the config file, not from the process working directory. Under this helper the config lives in the data directory, so the state file is `<data>/veeam-vhc-aws-state.json`. Launch prints it as `state`. The Settings page shows the same path. Pages read the file on each load, so you can write it after launch and reload. It is gitignored. Two UIs can run together only when each launch has its own `VHC_VERIFY_RUN_ID`, its own data directory, and its own port. Leave the variable unset for a single run. The helper records that run in `/tmp/vhc-verify/latest`.
 
 Requires the .NET 10 SDK (`dotnet` on `PATH`) and Google Chrome (`CHROME_BIN` or a standard install path). On a Cloud Agent checkout that has neither SDK nor packages, run `bash .cursor/install.sh` once.
 

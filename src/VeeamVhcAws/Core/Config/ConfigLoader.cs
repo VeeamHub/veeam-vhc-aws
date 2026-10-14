@@ -108,15 +108,8 @@ public static class ConfigLoader
         return AnchorPath(fullConfig, stateFile);
     }
 
-    public static string AnchorPath(string configPath, string path)
-    {
-        if (Path.IsPathRooted(path))
-            return Path.GetFullPath(path);
-        var dir = Path.GetDirectoryName(Path.GetFullPath(configPath));
-        if (string.IsNullOrEmpty(dir))
-            return Path.GetFullPath(path);
-        return Path.GetFullPath(Path.Combine(dir, path));
-    }
+    public static string AnchorPath(string configPath, string path) =>
+        ConfigPathJail.Resolve(configPath, path);
 
     public static Dictionary<string, object> LoadConfig(string path)
     {

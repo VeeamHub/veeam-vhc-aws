@@ -363,6 +363,15 @@ if ($Upgrade) {
             }
         }
 
+        # ---- Feature: data_directory ----
+        if ($configText -match '(?m)^global:' -and $configText -notmatch '(?m)^\s*data_directory:') {
+            $dataDirYaml = $dataDir -replace '\\', '/'
+            $configText = Insert-ConfigBlock $configText "global" "  data_directory: '$dataDirYaml'"
+            Save-Config $configText
+            Write-Host "  data_directory: added ($dataDir)" -ForegroundColor DarkGray
+            $anyUpdates = $true
+        }
+
         # ---- Feature: session_timeout_seconds ----
         if ($configText -match '(?m)^global:' -and $configText -notmatch 'session_timeout_seconds') {
             $configText = Insert-ConfigBlock $configText "global" "  session_timeout_seconds: 600  # /api/v1/sessions timeout; raise for large deployments (e.g. 1200)"
@@ -799,6 +808,7 @@ $logPath = Join-Path $logDir "veeam-vhc-aws.log"
 $statePath = Join-Path $dataDir "veeam-vhc-aws-state.json"
 $logYaml = $logPath -replace '\\', '/'
 $stateYaml = $statePath -replace '\\', '/'
+$dataDirYaml = $dataDir -replace '\\', '/'
 
 $configContent = @"
 # Veeam VHC AWS configuration
@@ -810,6 +820,7 @@ global:
   retry_delay_seconds: 5
   page_size: 500
   max_pages: 100
+  data_directory: '$dataDirYaml'
   state_file: '$stateYaml'
   logging:
     level: INFO

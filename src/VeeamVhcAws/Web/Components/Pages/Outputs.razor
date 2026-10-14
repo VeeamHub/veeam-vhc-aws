@@ -111,12 +111,12 @@ else
     private void SaveOutput(OutputEdit edit)
     {
         if (_cfg is null) return;
-        var outputs = _cfg.Outputs.Select(o => new OutputEdit(o.Type, new Dictionary<string, object?>(o.Fields), new HashSet<string>())).ToList();
+        var outputs = _cfg.Outputs.Select(EditFrom).ToList();
 
         if (_isNew)
             outputs.Add(edit);
         else if (_editingIdx is int idx && idx >= 0 && idx < outputs.Count)
-            outputs[idx] = edit;
+            outputs[idx] = edit with { Id = _cfg.Outputs[idx].Id };
 
         Config.SaveOutputs(outputs);
         _flash = _isNew ? "Output handler added" : "Output handler updated";
@@ -141,7 +141,7 @@ else
         var outputs = _cfg.Outputs
             .Select((o, i) => new { o, i })
             .Where(x => x.i != deleteIdx)
-            .Select(x => new OutputEdit(x.o.Type, new Dictionary<string, object?>(x.o.Fields), new HashSet<string>()))
+            .Select(x => EditFrom(x.o))
             .ToList();
 
         Config.SaveOutputs(outputs);
@@ -149,6 +149,9 @@ else
         _confirmingDeleteIdx = null;
         Refresh();
     }
+
+    private static OutputEdit EditFrom(OutputView o) =>
+        new(o.Type, new Dictionary<string, object?>(o.Fields), new HashSet<string>(), o.Id);
 
     private static string PrimaryTarget(OutputView o) => o.Type switch
     {

@@ -43,6 +43,20 @@ public class SetupScriptTests
     }
 
     [Fact]
+    public void GeneratedConfig_EmitsDataDirectory_AndKeepsStateAndLogUnderIt()
+    {
+        var text = SetupText();
+        Assert.Contains("$dataDir = Join-Path $env:ProgramData \"VHC\"", text);
+        Assert.Contains("$dataDirYaml = $dataDir -replace '\\\\', '/'", text);
+        Assert.Contains("data_directory: '$dataDirYaml'", text);
+        Assert.Contains("$statePath = Join-Path $dataDir \"veeam-vhc-aws-state.json\"", text);
+        Assert.Contains("$logDir = Join-Path $dataDir \"logs\"", text);
+        Assert.Contains("$logPath = Join-Path $logDir \"veeam-vhc-aws.log\"", text);
+        Assert.Contains("state_file: '$stateYaml'", text);
+        Assert.Contains("file: '$logYaml'", text);
+    }
+
+    [Fact]
     public void LogPath_IsSingleQuotedWithForwardSlashes()
     {
         var text = SetupText();

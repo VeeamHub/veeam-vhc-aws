@@ -73,7 +73,7 @@ public class ConfigServiceTests : IDisposable
         var edit = new ServerEdit(
             Name: "keep-pw",
             Type: "vbr",
-            Url: "https://x:9420",
+            Url: "https://x:9419",
             Username: "u",
             Password: "",
             PasswordChanged: false,
@@ -85,8 +85,43 @@ public class ConfigServiceTests : IDisposable
         var reloaded = ConfigLoader.LoadConfig(_configPath);
         var server = reloaded.GetListOfSections("servers")[0];
         Assert.Equal("ENC:originalciphertext", server.Get("password", ""));
-        Assert.Equal("https://x:9420", server.Get("url", ""));
+        Assert.Equal("https://x:9419", server.Get("url", ""));
         Assert.True(server.Get("verify_ssl", false));
+    }
+
+    [Fact]
+    public void SaveServers_UrlChangeWithoutNewPassword_IsRejected()
+    {
+        var initial = "servers:\n  - name: keep-pw\n    type: vbr\n    url: https://x:9419\n    username: u\n    password: \"ENC:originalciphertext\"\n    verify_ssl: false\n";
+        var svc = BuildService(initial);
+        var before = File.ReadAllText(_configPath);
+
+        var edit = new ServerEdit(
+            Name: "keep-pw",
+            Type: "vbr",
+            Url: "https://x:9420",
+            Username: "u",
+            Password: "",
+            PasswordChanged: false,
+            VerifySsl: true,
+            ApiVersion: "1.3-rev1");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => svc.SaveServers(new[] { edit }));
+        Assert.Equal("A server URL change requires a new password.", ex.Message);
+        Assert.Equal(before, File.ReadAllText(_configPath));
+    }
+
+    [Fact]
+    public void SaveServers_HttpUrl_IsStored()
+    {
+        var svc = BuildService("servers: []\n");
+        svc.SaveServers(new[]
+        {
+            new ServerEdit("plain", "vbr", "http://vbr.internal:9419", "u", "pw", true, false, ""),
+        });
+
+        var server = ConfigLoader.LoadConfig(_configPath).GetListOfSections("servers")[0];
+        Assert.Equal("http://vbr.internal:9419", server.Get("url", ""));
     }
 
     [Fact]
@@ -132,6 +167,27 @@ public class ConfigServiceTests : IDisposable
         Assert.Equal("webhook", outputs[1].Get("type", ""));
         Assert.Equal("https://ntfy.sh/topic", outputs[1].Get("url", ""));
         Assert.Equal("ntfy", outputs[1].Get("template", ""));
+    }
+
+    [Fact]
+    public void SaveOutputs_KeepsAllowLoopbackWhenTheFormOmitsIt()
+    {
+        var initial = "output:\n  - type: webhook\n    url: https://hooks.example/secret\n    template: generic\n    allow_loopback: true\n";
+        var svc = BuildService(initial);
+
+        svc.SaveOutputs(new[]
+        {
+            new OutputEdit("webhook", new Dictionary<string, object?>
+            {
+                ["url"] = "https://hooks.example/secret",
+                ["template"] = "ntfy",
+            }, new HashSet<string>()),
+        });
+
+        var output = ConfigLoader.LoadConfig(_configPath).GetListOfSections("output")[0];
+        Assert.Equal("https://hooks.example/secret", output.Get("url", ""));
+        Assert.Equal("ntfy", output.Get("template", ""));
+        Assert.True(output.Get("allow_loopback", false));
     }
 
     [Fact]
@@ -211,6 +267,49 @@ public class ConfigServiceTests : IDisposable
         var thresh = repoHealth.GetSection("thresholds");
         Assert.Equal(20, thresh.Get("free_space_warning_pct", 0));
         Assert.Equal(8, thresh.Get("free_space_critical_pct", 0));
+    }
+
+    [Fact]
+    public void Load_MasksWebhookUrl_AndLeavesPushgatewayVisible()
+    {
+        var svc = BuildService("""
+            output:
+              - type: webhook
+                url: https://hooks.example/services/T123/SECRET
+                template: slack
+              - type: prometheus
+                mode: pushgateway
+                url: http://10.1.2.3:9091
+            """);
+        var snap = svc.Load();
+        Assert.Equal("********", snap.Outputs[0].Fields["url"]);
+        Assert.Equal("http://10.1.2.3:9091", snap.Outputs[1].Fields["url"]);
+    }
+
+    [Fact]
+    public void SaveOutputs_MaskedWebhookUrl_KeepsTheStoredUrl()
+    {
+        var svc = BuildService("""
+            output:
+              - type: webhook
+                url: https://hooks.example/services/T123/SECRET
+                template: slack
+            """);
+        var loaded = svc.Load();
+
+        svc.SaveOutputs(new[]
+        {
+            new OutputEdit("webhook", new Dictionary<string, object?>
+            {
+                ["url"] = "********",
+                ["template"] = "ntfy",
+            }, new HashSet<string>(), loaded.Outputs[0].Id),
+        });
+
+        var output = ConfigLoader.LoadConfig(_configPath).GetListOfSections("output")[0];
+        Assert.Equal("https://hooks.example/services/T123/SECRET", output.Get("url", ""));
+        Assert.Equal("ntfy", output.Get("template", ""));
+        Assert.DoesNotContain("********", File.ReadAllText(_configPath));
     }
 
     [Fact]

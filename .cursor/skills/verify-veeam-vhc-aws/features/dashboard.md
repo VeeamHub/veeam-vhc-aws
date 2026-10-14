@@ -31,7 +31,7 @@ Preconditions:
 ## Gotchas
 
 - The OK banner is shown only after `last_run` is a real timestamp and there are zero error, critical, and warning findings. A missing, blank, or unparseable `last_run` shows `No runs yet` instead, including on the Last Run card.
-- Write `{"last_run":"2026-10-13T12:00:00Z","findings":{},"captured_errors":{},"suppressions":{}}` to the state path printed by launch, then reload `/`. The banner says `All monitors clear`. That path is the project directory under `dotnet run`, not the data directory. Settings shows the same path.
+- Write `{"last_run":"2026-10-13T12:00:00Z","findings":{},"captured_errors":{},"suppressions":{}}` to the state path printed by launch, then reload `/`. The banner says `All monitors clear`. That path is the data directory next to the config file. Settings shows the same path.
 - The page reloads its data every 10 seconds. Wait for the heading or the server name, not for a fixed sleep.
 - `Add a server` is a link to `/servers`. It does not open the Add Server dialog by itself.
 - Counts come from the config and state files of this process. A server saved in a different run's data directory does not appear here.

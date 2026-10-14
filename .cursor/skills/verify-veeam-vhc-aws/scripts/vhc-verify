@@ -175,7 +175,7 @@ cmd_launch() {
   CONFIG=$config
   DATA_DIR="$dir/data"
   EVIDENCE_DIR="$ROOT/evidence/$id"
-  STATE_PATH="$REPO/src/VeeamVhcAws/veeam-vhc-aws-state.json"
+  STATE_PATH="$DATA_DIR/veeam-vhc-aws-state.json"
   write_meta
   if [ -z "${VHC_VERIFY_RUN_ID:-}" ]; then
     printf '%s\n' "$id" >"$LATEST"
@@ -225,7 +225,7 @@ cmd_doctor() {
   note "data=$DATA_DIR"
   note "evidence=$EVIDENCE_DIR"
   if [ -z "${STATE_PATH:-}" ]; then
-    STATE_PATH="$REPO/src/VeeamVhcAws/veeam-vhc-aws-state.json"
+    STATE_PATH="$DATA_DIR/veeam-vhc-aws-state.json"
   fi
   note "state=$STATE_PATH"
   if [ -f "$STATE_PATH" ]; then
