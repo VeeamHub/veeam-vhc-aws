@@ -8,7 +8,7 @@ param(
     [string]$AlertUrl,
 
     [Parameter(Mandatory=$false)]
-    [int]$IntervalMinutes = 60,
+    [int]$IntervalMinutes = 5,
 
     [Parameter(Mandatory=$false)]
     [string]$InstallDir = "$env:ProgramFiles\VHC",
@@ -340,12 +340,8 @@ if ($Upgrade) {
             $logChoice = Read-Host "  Migrate logs to VHC\logs\ subfolder? (y/n) [y]"
             if ($logChoice -ne "n") {
                 $logDir = Join-Path $dataDir "logs"
-                if (-not (Test-Path $logDir)) {
-                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-                    icacls $logDir /grant "Users:(OI)(CI)M" 2>$null | Out-Null
-                }
-                # Update the config file path
-                $configText = $configText -replace '(file:\s*")[^"]*\\VHC\\(veeam-vhc-aws)', "`$1$($dataDir -replace '\\', '\\')\\logs\\`$2"
+                Protect-VhcSystemDirectory $logDir
+                $configText = Set-LoggingPathToVhcLogs $configText $dataDir
                 Save-Config $configText
                 # Move existing log files
                 $existingLogs = Get-ChildItem -Path $dataDir -Filter "veeam-vhc-aws*.log" -ErrorAction SilentlyContinue
@@ -519,6 +515,34 @@ try {
     Write-Host "     Run:  Add-MpPreference -ExclusionPath '$exeDest'" -ForegroundColor Yellow
 }
 
+function Set-LoggingPathToVhcLogs {
+    param(
+        [Parameter(Mandatory)][string]$ConfigText,
+        [Parameter(Mandatory)][string]$DataDir
+    )
+    $escapedDataDir = $DataDir -replace '\\', '\\'
+    return ($ConfigText -replace '(file:\s*")[^"]*\\VHC\\(veeam-vhc-aws)', "`${1}${escapedDataDir}\\logs\\`$2")
+}
+
+function Protect-VhcSystemDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+    icacls $Path /inheritance:r | Out-Null
+    icacls $Path /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
+}
+
+function Read-VerifySslChoice {
+    param([string]$ProductName)
+    $answer = Read-Host "  Verify the TLS certificate for $ProductName? (y/n) [y]"
+    if ($answer -match '^[nN]') {
+        Write-Host "  WARNING: TLS verification is off. An on-path attacker can collect the $ProductName password." -ForegroundColor Red
+        return $false
+    }
+    return $true
+}
+
 # --- 2. Generate config from user input ---
 Write-Host ""
 Write-Host "[2/5] Configuring monitoring targets" -ForegroundColor Yellow
@@ -537,13 +561,15 @@ if ($vbrUrl) {
     # Escape backslashes for YAML double-quoted strings (e.g. DOMAIN\user -> DOMAIN\\user)
     $vbrUserYaml = $vbrUser -replace '\\', '\\'
     $vbrPassYaml = ConvertTo-ObfuscatedPassword $vbrPassPlain
+    $vbrVerifySsl = Read-VerifySslChoice "VBR"
+    $verifySslYaml = $vbrVerifySsl.ToString().ToLower()
     $vbrBlock = @"
   - name: vbr
     type: vbr
     url: $vbrUrl
     username: "$vbrUserYaml"
     password: "$vbrPassYaml"
-    verify_ssl: false
+    verify_ssl: $verifySslYaml
 "@
 }
 
@@ -559,13 +585,15 @@ if ($vbawsUrl) {
     # Escape backslashes for YAML double-quoted strings
     $vbawsUserYaml = $vbawsUser -replace '\\', '\\'
     $vbawsPassYaml = ConvertTo-ObfuscatedPassword $vbawsPassPlain
+    $vbawsVerifySsl = Read-VerifySslChoice "VBAWS"
+    $verifySslYaml = $vbawsVerifySsl.ToString().ToLower()
     $vbawsBlock = @"
   - name: vbaws
     type: vbaws
     url: $vbawsUrl
     username: "$vbawsUserYaml"
     password: "$vbawsPassYaml"
-    verify_ssl: false
+    verify_ssl: $verifySslYaml
 "@
 }
 
@@ -760,36 +788,37 @@ if ($NoSummary) {
 }
 
 # --- 2c. Check interval ---
-Write-Host ""
-Write-Host "[2c/5] Setting check interval" -ForegroundColor Yellow
-Write-Host ""
-while ($true) {
-    $intervalInput = Read-Host "  How often should VHC run checks? (minutes, default: 60)"
-    if ([string]::IsNullOrWhiteSpace($intervalInput)) {
-        $IntervalMinutes = 60
-        break
+if ($PSBoundParameters.ContainsKey('IntervalMinutes')) {
+    if ($IntervalMinutes -lt 1) {
+        Write-Host "ERROR: IntervalMinutes must be a positive integer." -ForegroundColor Red
+        exit 1
     }
-    $parsed = 0
-    if ([int]::TryParse($intervalInput, [ref]$parsed) -and $parsed -gt 0) {
-        $IntervalMinutes = $parsed
-        break
+    Write-Host ""
+    Write-Host "[2c/5] Check interval: $IntervalMinutes minutes (from -IntervalMinutes)" -ForegroundColor Yellow
+} else {
+    Write-Host ""
+    Write-Host "[2c/5] Setting check interval" -ForegroundColor Yellow
+    Write-Host ""
+    while ($true) {
+        $intervalInput = Read-Host "  How often should VHC run checks? (minutes, default: 5)"
+        if ([string]::IsNullOrWhiteSpace($intervalInput)) {
+            $IntervalMinutes = 5
+            break
+        }
+        $parsed = 0
+        if ([int]::TryParse($intervalInput, [ref]$parsed) -and $parsed -gt 0) {
+            $IntervalMinutes = $parsed
+            break
+        }
+        Write-Host "  Invalid input. Please enter a positive integer." -ForegroundColor Yellow
     }
-    Write-Host "  Invalid input. Please enter a positive integer." -ForegroundColor Yellow
 }
 Write-Host "  -> Check interval: $IntervalMinutes minutes" -ForegroundColor Green
 
-# Logs and state go in ProgramData so non-elevated manual runs can also write
 $dataDir = Join-Path $env:ProgramData "VHC"
-if (-not (Test-Path $dataDir)) {
-    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
-    # Grant Users modify access so non-elevated runs can write logs
-    icacls $dataDir /grant "Users:(OI)(CI)M" | Out-Null
-}
 $logDir = Join-Path $dataDir "logs"
-if (-not (Test-Path $logDir)) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-    icacls $logDir /grant "Users:(OI)(CI)M" 2>$null | Out-Null
-}
+Protect-VhcSystemDirectory $dataDir
+Protect-VhcSystemDirectory $logDir
 $logPath = Join-Path $logDir "veeam-vhc-aws.log"
 $statePath = Join-Path $dataDir "veeam-vhc-aws-state.json"
 

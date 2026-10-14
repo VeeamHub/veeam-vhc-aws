@@ -82,7 +82,7 @@ veeam-vhc-aws all -c config.yaml --no-interactive
 4. The setup wizard will walk you through:
    - Configuring your VBR and/or VBAWS servers
    - Choosing how you want to be notified (ntfy, Slack, Teams, PagerDuty, email, or multiple)
-   - Creating a Windows Scheduled Task to run automatically every 5 minutes
+   - Creating a Windows Scheduled Task to run automatically every 5 minutes (`-IntervalMinutes` changes that; `-Upgrade` leaves an existing task interval alone)
 
 That's it. The monitor is now running on a schedule and will alert you when issues are detected.
 
@@ -190,7 +190,7 @@ veeam-vhc-aws ui -c config.yaml --no-browser
 **Authentication:**
 
 - **Localhost (default)** — `--bind 127.0.0.1`. No auth — accessible only from the same machine. RDP in, open browser, manage.
-- **Remote** — `--bind 0.0.0.0` or specific IP. A 64-char token is auto-generated on first run and stored at `C:\ProgramData\VHC\ui-token.txt` (Windows) or `~/.vhc/ui-token.txt` (others). Token is appended to the URL on startup (`http://server:9101/?t=<token>`) and persisted in a cookie after first visit. Rotate with `veeam-vhc-aws ui --regen-token`.
+- **Remote** — `--bind 0.0.0.0` or specific IP. A 64-char token is auto-generated on first run and stored at `C:\ProgramData\VHC\ui-token.txt` (Windows) or `~/.vhc/ui-token.txt` (others). The file is readable only by its owner (and, on Windows, SYSTEM and Administrators). Token is appended to the URL on startup (`http://server:9101/?t=<token>`) and persisted in a cookie after first visit. The cookie is marked Secure when the request is HTTPS. Rotate with `veeam-vhc-aws ui --regen-token`. Sending the token over plain HTTP puts it in browser history and Referer headers.
 
 **Coexistence with the scheduled task:** The UI is purely an operator console — it reads the state file the scheduled task writes. You can run the UI continuously without affecting the every-5-minutes monitor task. Changes to `config.yaml` made via the UI are picked up by the next scheduled run automatically.
 
