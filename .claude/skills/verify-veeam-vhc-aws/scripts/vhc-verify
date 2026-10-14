@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO=$(cd "$SCRIPT_DIR/../../../.." && pwd)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+REPO=$(cd "$SCRIPT_DIR/../../../.." && pwd -P)
 ROOT=${VHC_VERIFY_ROOT:-/tmp/vhc-verify}
 LATEST="$ROOT/latest"
+# macOS keeps lsof in /usr/sbin, which agent shells often leave off PATH.
+export PATH="$PATH:/usr/sbin:/sbin"
 
 if [ -x "$HOME/.dotnet/dotnet" ]; then
   export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
@@ -53,6 +55,15 @@ load_meta() {
   . "$meta"
 }
 
+# Start a command as a new session leader, so cleanup can signal the whole
+# process group. macOS has no setsid binary; perl's POSIX::setsid does the same.
+new_session() {
+  if command -v setsid >/dev/null 2>&1; then
+    exec setsid "$@"
+  fi
+  exec perl -MPOSIX -e 'POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n"' "$@"
+}
+
 chrome_bin() {
   if [ -n "${CHROME_BIN:-}" ] && [ -x "$CHROME_BIN" ]; then
     printf '%s\n' "$CHROME_BIN"
@@ -63,7 +74,8 @@ chrome_bin() {
     /usr/local/bin/google-chrome \
     /usr/bin/google-chrome \
     /opt/google/chrome/chrome \
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
   do
     if [ -x "$candidate" ]; then
       printf '%s\n' "$candidate"
@@ -103,7 +115,7 @@ descendants() {
   local pid=$1
   local child
   echo "$pid"
-  for child in $(ps -o pid= --ppid "$pid" 2>/dev/null || true); do
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
     descendants "$child"
   done
 }
@@ -161,7 +173,7 @@ cmd_launch() {
   local log="$dir/ui.log"
   (
     cd "$dir/data"
-    exec setsid dotnet run --project "$REPO/src/VeeamVhcAws/VeeamVhcAws.csproj" -- ui \
+    new_session dotnet run --project "$REPO/src/VeeamVhcAws/VeeamVhcAws.csproj" -- ui \
       -c "$config" \
       --bind 127.0.0.1 \
       --port "$port" \

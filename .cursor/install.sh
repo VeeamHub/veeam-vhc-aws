@@ -26,8 +26,8 @@ dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
 dotnet restore tests/VeeamVhcAws.Tests/VeeamVhcAws.Tests.csproj
 dotnet restore tests/VeeamVhcAws.UiTests/VeeamVhcAws.UiTests.csproj
 
-if [ -f .cursor/skills/verify-veeam-vhc-aws/scripts/package-lock.json ]; then
-  npm ci --omit=dev --prefix .cursor/skills/verify-veeam-vhc-aws/scripts
+if [ -f .claude/skills/verify-veeam-vhc-aws/scripts/package-lock.json ]; then
+  npm ci --omit=dev --prefix .claude/skills/verify-veeam-vhc-aws/scripts
 else
-  npm install --omit=dev --prefix .cursor/skills/verify-veeam-vhc-aws/scripts
+  npm install --omit=dev --prefix .claude/skills/verify-veeam-vhc-aws/scripts
 fi

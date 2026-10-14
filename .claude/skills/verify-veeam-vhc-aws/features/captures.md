@@ -40,10 +40,10 @@ Preconditions:
 }
 ```
 
-- **Empty page.** The heading is Captured Errors and the page says `No captured errors yet.` Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser goto /captures` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-heading "Captured Errors"` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser assert-text "No captured errors yet."`.
-- **Suppress.** After the state file is in place, reload `/captures`. The key cell shows `abc`. Choose **Suppress repo-cap**. The flash says `Suppressed repo-cap` and the button becomes **Unsuppress repo-cap**. The state file has `abc` under `suppressions`. Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Suppress repo-cap"` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-text "Suppressed repo-cap"`.
-- **Filter.** Set **Show** to `unsuppressed`. The page says `No captured errors match the current filter.` Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser select --label Show --value unsuppressed`.
-- **Proof.** Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser screenshot --path "$EVIDENCE/captures/list.png"` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser snapshot --path "$EVIDENCE/captures/list.aria.txt"`.
+- **Empty page.** The heading is Captured Errors and the page says `No captured errors yet.` Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser goto /captures` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-heading "Captured Errors"` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser assert-text "No captured errors yet."`.
+- **Suppress.** After the state file is in place, reload `/captures`. The key cell shows `abc`. Choose **Suppress repo-cap**. The flash says `Suppressed repo-cap` and the button becomes **Unsuppress repo-cap**. The state file has `abc` under `suppressions`. Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Suppress repo-cap"` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-text "Suppressed repo-cap"`.
+- **Filter.** Set **Show** to `unsuppressed`. The page says `No captured errors match the current filter.` Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser select --label Show --value unsuppressed`.
+- **Proof.** Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser screenshot --path "$EVIDENCE/captures/list.png"` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser snapshot --path "$EVIDENCE/captures/list.aria.txt"`.
 
 ## Gotchas
 
