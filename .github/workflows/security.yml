@@ -57,15 +57,7 @@ jobs:
       # matches a human-chosen password in a `password:` field, which is how
       # veeam-monitor.yaml stayed in this repo undetected. This gate covers that
       # class specifically: a literal credential assigned in a tracked config file.
-      # Allowed values are empty, ${VAR}, ${{ expr }}, {{ template }}, <placeholder>, null, ~.
+      # smtp_password is included. Allowed values are empty, ${VAR}, ${{ expr }},
+      # {{ template }}, <placeholder>, null, ~, and ENC: ciphertext.
       - name: Scan tracked config files for literal credentials
-        run: |
-          hits=$(git grep -nIE '^[[:space:]]*(password|passwd|secret|api[_-]?key|apikey|token|bind_?password)[[:space:]]*:[[:space:]]*[^[:space:]]' \
-                  -- '*.yaml' '*.yml' '*.json' '*.toml' '*.config' '*.xml' 2>/dev/null \
-                | grep -vE ':[[:space:]]*("" *|'"''"' *|\$\{\{.*\}\}|\$\{[^}]*\}|\{\{.*\}\}|<[^>]*>|null|~)[[:space:]]*,?[[:space:]]*$' || true)
-          if [ -n "$hits" ]; then
-            echo "$hits" | sed -E 's/(:[[:space:]]*).*/\1<redacted>/'
-            echo "::error::Literal credential found in a tracked config file. Use an env var or an empty placeholder."
-            exit 1
-          fi
-          echo "clean: no literal credentials in tracked config files"
+        run: bash .github/scripts/check-plaintext-credentials.sh

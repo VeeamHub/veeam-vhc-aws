@@ -22,6 +22,7 @@ public static class CommandHelpers
         LoadAndSetup(string? configArg)
     {
         var configPath = ConfigLoader.GetConfigPath(configArg);
+        SecretKeyStore.BindProcessDirectory(configPath);
         var config = ConfigLoader.LoadConfig(configPath);
         LoggingSetup.Setup(config);
         Logger.Information("veeam-vhc-aws starting (PID {ProcessId})", Environment.ProcessId);

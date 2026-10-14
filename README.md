@@ -112,6 +112,8 @@ docker run -v /path/to/config.yaml:/config/veeam-vhc-aws.yaml \
 
 The image command is `all --config /config/veeam-vhc-aws.yaml`. Mount the config at that path. The `VEEAM_VHC_AWS_CONFIG` variable does not override a `--config` argument.
 
+Passwords in the config are encrypted with a machine-local key, not a passphrase from this repository. The key file is created beside the config as `.veeam-vhc-aws.key` when you pass `-c`, or at the path in `VEEAM_VHC_AWS_KEY_FILE`. Mount that file with the config. A container home directory does not keep the default `~/.vhc/secret.key` across runs. On Windows the key blob is wrapped with DPAPI LocalMachine, and the file ACL is the access control.
+
 > The Docker image is built with the .NET 10 SDK and runs as a self-contained binary on a minimal `runtime-deps` base image.
 
 ### Usage
@@ -149,7 +151,7 @@ veeam-vhc-aws captures list -c config.yaml
 veeam-vhc-aws captures suppress <key> -c config.yaml
 veeam-vhc-aws captures unsuppress <key> -c config.yaml
 
-# Obfuscate plaintext passwords in config file in-place
+# Encrypt plaintext passwords, and rewrap legacy ENC: values, with the machine-local key
 veeam-vhc-aws encrypt-config -c config.yaml
 
 # Print version
@@ -183,7 +185,7 @@ veeam-vhc-aws ui -c config.yaml --no-browser
 |---|---|
 | **Dashboard** | At-a-glance status banner, per-server health cards, last-run time, finding counts |
 | **Alerts** | Live table of active findings with severity badges. **Click [Suppress] to silence an alert.** Filter by severity/server, search by resource. Auto-refreshes every 5s. |
-| **Servers** | Add/edit/delete VBR and VBAWS servers via forms. Passwords are obfuscated on save via the same `PasswordObfuscator` the CLI uses. |
+| **Servers** | Add/edit/delete VBR and VBAWS servers via forms. Passwords are encrypted on save with a machine-local key and stored with an `ENC:` prefix. Existing values written by the old shared passphrase still decrypt. `encrypt-config` rewrites those legacy values. |
 | **Outputs** | Add/edit/delete notification channels — webhook (Slack/Teams/ntfy/PagerDuty), email (SMTP), Prometheus, JSON file. Per-type form fields. |
 | **Thresholds** | Tabbed editor for per-monitor thresholds (Repo Health / Retention / Worker Health). |
 | **Captures** | Historical error log with filter (suppressed/unsuppressed). Same suppress/unsuppress controls as Alerts. |
@@ -204,7 +206,7 @@ When run in an interactive terminal, veeam-vhc-aws renders a rich terminal UI us
 
 **First-run detection:** If you run `veeam-vhc-aws` with no arguments and no config file exists, the tool offers to launch the setup wizard automatically.
 
-**Setup wizard (`setup`):** A 7-step guided wizard that collects server details (with live connectivity test), notification channels, output options, and alert thresholds — then writes an encrypted config file ready to use. Passwords are obfuscated on disk automatically. Use `--template` to get the old behavior (copy the example config file).
+**Setup wizard (`setup`):** A 7-step guided wizard that collects server details (with live connectivity test), notification channels, output options, and alert thresholds, then writes a config file. Passwords are encrypted with a machine-local key (`ENC:` prefix). Anyone who can read the key file can decrypt them. Use `--template` to copy the example config instead.
 
 **Live monitor progress (`all`):** While monitors run, a live table shows each server × monitor with a real-time status indicator. Only shown when no `json_stdout` output handler is configured (to avoid mixing UI chrome with JSON output).
 

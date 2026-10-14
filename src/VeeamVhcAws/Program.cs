@@ -82,7 +82,7 @@ public class Program
                 ("captures",       "View and manage captured errors and suppressions"),
                 ("version",        "Print the version"),
                 ("setup",          "Interactive wizard or --template to copy example config"),
-                ("encrypt-config", "Obfuscate plaintext passwords in config file in-place"),
+                ("encrypt-config", "Protect plaintext and legacy ENC passwords in a config file"),
                 ("ui",             "Launch the web admin GUI (browser-based)"),
             ];
 

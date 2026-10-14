@@ -28,6 +28,7 @@ public static class UiCommand
         command.SetHandler(async (string? config, int port, string bind, bool noBrowser, bool regenToken) =>
         {
             var configPath = ConfigLoader.GetConfigPath(config);
+            SecretKeyStore.BindProcessDirectory(configPath);
             if (File.Exists(configPath))
             {
                 var cfg = ConfigLoader.LoadConfig(configPath);
