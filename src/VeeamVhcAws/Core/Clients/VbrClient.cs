@@ -253,8 +253,16 @@ public class VbrClient : IVbrClient
             }
             catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.InternalServerError)
             {
+                if (pages >= _maxPages)
+                {
+                    Logger.Warning("Backups pagination circuit breaker: stopped after {Pages} pages ({Count} backups)",
+                        _maxPages, allBackups.Count);
+                    break;
+                }
+
                 Logger.Warning("VBR /api/v1/backups batch failed at offset {Offset} — falling back to per-item fetch", offset);
                 bool endReached = false;
+                int fetched = 0;
                 for (int i = 0; i < _pageSize; i++)
                 {
                     try
@@ -272,6 +280,7 @@ public class VbrClient : IVbrClient
                             break;
                         }
                         allBackups.AddRange(page);
+                        fetched += page.Count;
                     }
                     catch (HttpRequestException)
                     {
@@ -281,6 +290,17 @@ public class VbrClient : IVbrClient
                 }
                 pages++;
                 if (endReached) break;
+                if (fetched == 0)
+                {
+                    Logger.Warning("Backups fallback page at offset {Offset} returned no items — stopping", offset);
+                    break;
+                }
+                if (pages >= _maxPages)
+                {
+                    Logger.Warning("Backups pagination circuit breaker: stopped after {Pages} pages ({Count} backups)",
+                        _maxPages, allBackups.Count);
+                    break;
+                }
                 offset += _pageSize;
             }
         }

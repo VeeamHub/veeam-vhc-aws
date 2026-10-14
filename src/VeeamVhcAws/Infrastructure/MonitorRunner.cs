@@ -22,13 +22,22 @@ public static class MonitorRunner
         IProgress<MonitorProgressEvent>? progress = null)
     {
         var allResults = new List<MonitorResult>();
+        var pendingSuccess = new List<(string Server, string Monitor)>();
+        var pendingGate = new object();
 
         if (servers.Count > ParallelThreshold)
         {
             Logger.Information("Running {Count} servers in parallel (threshold={Threshold})",
                 servers.Count, ParallelThreshold);
             var tasks = servers.Select(ctx =>
-                Task.Run(() => RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState, progress))
+                Task.Run(() =>
+                {
+                    var localSuccess = new List<(string Server, string Monitor)>();
+                    var results = RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState, localSuccess, progress);
+                    lock (pendingGate)
+                        pendingSuccess.AddRange(localSuccess);
+                    return results;
+                })
             ).ToArray();
 
             try
@@ -53,9 +62,16 @@ public static class MonitorRunner
         {
             foreach (var ctx in servers)
             {
-                var results = RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState, progress);
+                var results = RunMonitorsForServer(ctx, config, patternEngine, monitorFilter, findingState, pendingSuccess, progress);
                 allResults.AddRange(results);
             }
+        }
+
+        if (findingState != null)
+        {
+            var recordedAt = DateTime.UtcNow;
+            foreach (var (server, monitor) in pendingSuccess)
+                findingState.SetLastSuccessTime(server, monitor, recordedAt);
         }
 
         return allResults;
@@ -67,6 +83,7 @@ public static class MonitorRunner
         PatternEngine? patternEngine,
         string? monitorFilter,
         FindingState? findingState,
+        List<(string Server, string Monitor)> pendingSuccess,
         IProgress<MonitorProgressEvent>? progress = null)
     {
         var applicable = GetApplicableMonitors(monitorFilter, serverCtx, config);
@@ -116,12 +133,8 @@ public static class MonitorRunner
                     Result = result,
                 });
 
-                // Track last successful run time for adaptive lookback
                 if (result.Errors.Count == 0 && findingState != null)
-                {
-                    findingState.SetLastSuccessTime(serverCtx.Name, name, DateTime.UtcNow);
-                    Logger.Debug("Recorded last success time for {Monitor} on '{Server}'", name, serverCtx.Name);
-                }
+                    pendingSuccess.Add((serverCtx.Name, name));
 
                 // If every non-metric finding is a connection error, the server is unreachable —
                 // skip remaining monitors rather than letting each one independently time out.

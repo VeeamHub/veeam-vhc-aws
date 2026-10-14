@@ -1,6 +1,7 @@
 using System.Text.Json;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
+using VeeamVhcAws.Core.State;
 
 namespace VeeamVhcAws.Web.Services;
 
@@ -50,6 +51,15 @@ public class StateService
 
     public bool Suppress(string key)
     {
+        lock (StateFile.Gate(_statePath))
+        {
+            using var hold = StateFile.Acquire(_statePath);
+            return SuppressUnlocked(key);
+        }
+    }
+
+    private bool SuppressUnlocked(string key)
+    {
         var root = LoadRoot();
         var captured = AsDict(root.GetValueOrDefault("captured_errors"));
         var findings = AsDict(root.GetValueOrDefault("findings"));
@@ -68,6 +78,15 @@ public class StateService
     }
 
     public bool Unsuppress(string key)
+    {
+        lock (StateFile.Gate(_statePath))
+        {
+            using var hold = StateFile.Acquire(_statePath);
+            return UnsuppressUnlocked(key);
+        }
+    }
+
+    private bool UnsuppressUnlocked(string key)
     {
         var root = LoadRoot();
         var suppressions = AsDict(root.GetValueOrDefault("suppressions"));
@@ -110,7 +129,7 @@ public class StateService
     private void Save(Dictionary<string, object> root)
     {
         var json = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_statePath, json);
+        StateFile.WriteAtomic(_statePath, json);
     }
 
     private static Dictionary<string, object> Deserialize(JsonElement el)

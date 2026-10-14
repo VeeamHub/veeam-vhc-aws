@@ -4,6 +4,7 @@ using Serilog;
 using Spectre.Console;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
+using VeeamVhcAws.Core.State;
 using VeeamVhcAws.Ui;
 
 namespace VeeamVhcAws.Commands;
@@ -113,45 +114,55 @@ public static class CapturesCommand
 
         command.SetHandler((string keyPrefix, string? config) =>
         {
-            var (statePath, state) = LoadStateWithPath(config);
-            if (state == null) return;
-
-            var capturedErrors = GetStateSection(state, "captured_errors");
-            var matches = capturedErrors.Keys.Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
-
-            if (matches.Count == 0)
+            var statePath = GetStatePath(config);
+            lock (StateFile.Gate(statePath))
             {
-                AnsiConsole.MarkupLine($"[red]No captured error matches key prefix '{Markup.Escape(keyPrefix)}'.[/]");
-                Environment.ExitCode = 1;
-                return;
+                using var hold = StateFile.Acquire(statePath);
+                SuppressCaptured(keyPrefix, config);
             }
-
-            if (matches.Count > 1)
-            {
-                AnsiConsole.MarkupLine($"[red]Ambiguous key prefix '{Markup.Escape(keyPrefix)}' — matches {matches.Count} entries:[/]");
-                foreach (var m in matches)
-                {
-                    var entry = capturedErrors[m] as Dictionary<string, object>;
-                    var text = entry?.GetValueOrDefault("text", "")?.ToString() ?? "";
-                    AnsiConsole.MarkupLine($"  {m[..8]}  {Markup.Escape(text)}");
-                }
-                Environment.ExitCode = 1;
-                return;
-            }
-
-            var matchedKey = matches[0];
-            var suppressions = GetStateSection(state, "suppressions");
-            suppressions[matchedKey] = new Dictionary<string, object>
-            {
-                ["suppressed_at"] = DateTime.UtcNow.ToString("O")
-            };
-            state["suppressions"] = suppressions;
-
-            SaveState(statePath!, state);
-            AnsiConsole.MarkupLine($"[green]Suppressed:[/] {matchedKey[..8]}");
         }, keyArg, configOption);
 
         return command;
+    }
+
+    private static void SuppressCaptured(string keyPrefix, string? config)
+    {
+        var (statePath, state) = LoadStateWithPath(config);
+        if (state == null) return;
+
+        var capturedErrors = GetStateSection(state, "captured_errors");
+        var matches = capturedErrors.Keys.Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (matches.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[red]No captured error matches key prefix '{Markup.Escape(keyPrefix)}'.[/]");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (matches.Count > 1)
+        {
+            AnsiConsole.MarkupLine($"[red]Ambiguous key prefix '{Markup.Escape(keyPrefix)}' — matches {matches.Count} entries:[/]");
+            foreach (var m in matches)
+            {
+                var entry = capturedErrors[m] as Dictionary<string, object>;
+                var text = entry?.GetValueOrDefault("text", "")?.ToString() ?? "";
+                AnsiConsole.MarkupLine($"  {m[..8]}  {Markup.Escape(text)}");
+            }
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var matchedKey = matches[0];
+        var suppressions = GetStateSection(state, "suppressions");
+        suppressions[matchedKey] = new Dictionary<string, object>
+        {
+            ["suppressed_at"] = DateTime.UtcNow.ToString("O")
+        };
+        state["suppressions"] = suppressions;
+
+        SaveState(statePath!, state);
+        AnsiConsole.MarkupLine($"[green]Suppressed:[/] {matchedKey[..8]}");
     }
 
     private static Command CreateUnsuppressCommand(Option<string?> configOption)
@@ -163,37 +174,47 @@ public static class CapturesCommand
 
         command.SetHandler((string keyPrefix, string? config) =>
         {
-            var (statePath, state) = LoadStateWithPath(config);
-            if (state == null) return;
-
-            var suppressions = GetStateSection(state, "suppressions");
-            var matches = suppressions.Keys.Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
-
-            if (matches.Count == 0)
+            var statePath = GetStatePath(config);
+            lock (StateFile.Gate(statePath))
             {
-                AnsiConsole.MarkupLine($"[red]No suppression matches key prefix '{Markup.Escape(keyPrefix)}'.[/]");
-                Environment.ExitCode = 1;
-                return;
+                using var hold = StateFile.Acquire(statePath);
+                UnsuppressCaptured(keyPrefix, config);
             }
-
-            if (matches.Count > 1)
-            {
-                AnsiConsole.MarkupLine($"[red]Ambiguous key prefix '{Markup.Escape(keyPrefix)}' — matches {matches.Count} suppressions:[/]");
-                foreach (var m in matches)
-                    AnsiConsole.MarkupLine($"  {m[..8]}");
-                Environment.ExitCode = 1;
-                return;
-            }
-
-            var matchedKey = matches[0];
-            suppressions.Remove(matchedKey);
-            state["suppressions"] = suppressions;
-
-            SaveState(statePath!, state);
-            AnsiConsole.MarkupLine($"[green]Unsuppressed:[/] {matchedKey[..8]}");
         }, keyArg, configOption);
 
         return command;
+    }
+
+    private static void UnsuppressCaptured(string keyPrefix, string? config)
+    {
+        var (statePath, state) = LoadStateWithPath(config);
+        if (state == null) return;
+
+        var suppressions = GetStateSection(state, "suppressions");
+        var matches = suppressions.Keys.Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (matches.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[red]No suppression matches key prefix '{Markup.Escape(keyPrefix)}'.[/]");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        if (matches.Count > 1)
+        {
+            AnsiConsole.MarkupLine($"[red]Ambiguous key prefix '{Markup.Escape(keyPrefix)}' — matches {matches.Count} suppressions:[/]");
+            foreach (var m in matches)
+                AnsiConsole.MarkupLine($"  {m[..8]}");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var matchedKey = matches[0];
+        suppressions.Remove(matchedKey);
+        state["suppressions"] = suppressions;
+
+        SaveState(statePath!, state);
+        AnsiConsole.MarkupLine($"[green]Unsuppressed:[/] {matchedKey[..8]}");
     }
 
     private static string GetStatePath(string? configArg)
@@ -284,6 +305,6 @@ public static class CapturesCommand
     {
         var options = new JsonSerializerOptions { WriteIndented = true };
         var json = JsonSerializer.Serialize(state, options);
-        File.WriteAllText(path, json);
+        StateFile.WriteAtomic(path, json);
     }
 }

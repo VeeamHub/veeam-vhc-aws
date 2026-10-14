@@ -14,6 +14,7 @@ public class FindingState
     private readonly string _path;
     private readonly List<string> _configSuppressions;
     private Dictionary<string, object> _state;
+    private bool _unreadable;
 
     public FindingState(string stateFile = "./veeam-vhc-aws-state.json", List<string>? configSuppressions = null)
     {
@@ -51,6 +52,7 @@ public class FindingState
         }
         catch (Exception e)
         {
+            _unreadable = true;
             Logger.Warning("Could not load state file {Path}: {Error}", _path, e.Message);
             return new Dictionary<string, object>
             {
@@ -60,6 +62,12 @@ public class FindingState
                 ["last_run"] = null!,
             };
         }
+    }
+
+    private void Reload()
+    {
+        _unreadable = false;
+        _state = Load();
     }
 
     private static Dictionary<string, object> DeserializeState(JsonElement element)
@@ -82,15 +90,14 @@ public class FindingState
 
     private void Save()
     {
+        if (_unreadable)
+            return;
+
         try
         {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(_path));
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(_state, options);
-            File.WriteAllText(_path, json);
+            StateFile.WriteAtomic(_path, json);
         }
         catch (Exception e)
         {
@@ -150,13 +157,30 @@ public class FindingState
 
     public void SetLastSuccessTime(string server, string monitor, DateTime time)
     {
-        var lastSuccess = GetLastSuccess();
-        var key = $"{server}:{monitor}";
-        lastSuccess[key] = time.ToUniversalTime().ToString("O");
-        Save();
+        lock (StateFile.Gate(_path))
+        {
+            using var hold = StateFile.Acquire(_path);
+            Reload();
+            if (_unreadable)
+                return;
+            var lastSuccess = GetLastSuccess();
+            var key = $"{server}:{monitor}";
+            lastSuccess[key] = time.ToUniversalTime().ToString("O");
+            Save();
+        }
     }
 
     public (List<MonitorResult> FilteredResults, List<Finding> Resolved) ProcessResults(List<MonitorResult> results)
+    {
+        lock (StateFile.Gate(_path))
+        {
+            using var hold = StateFile.Acquire(_path);
+            Reload();
+            return ProcessLoaded(results);
+        }
+    }
+
+    private (List<MonitorResult> FilteredResults, List<Finding> Resolved) ProcessLoaded(List<MonitorResult> results)
     {
         var now = DateTime.UtcNow.ToString("O");
         var currentKeys = new HashSet<string>();
