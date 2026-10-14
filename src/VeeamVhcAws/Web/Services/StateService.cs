@@ -28,11 +28,7 @@ public class StateService
 
     public StateService(WebHostOptions options)
     {
-        var cfg = File.Exists(options.ConfigPath)
-            ? ConfigLoader.LoadConfig(options.ConfigPath)
-            : new Dictionary<string, object>();
-        var global = cfg.GetSection("global");
-        _statePath = Path.GetFullPath(global.Get("state_file", "./veeam-vhc-aws-state.json"));
+        _statePath = ConfigLoader.ResolveStateFile(options.ConfigPath);
     }
 
     public string StateFilePath => _statePath;

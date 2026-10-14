@@ -99,6 +99,25 @@ public static class ConfigLoader
         return Path.GetFullPath(raw);
     }
 
+    public static string ResolveStateFile(string configPath)
+    {
+        var fullConfig = Path.GetFullPath(configPath);
+        var stateFile = "./veeam-vhc-aws-state.json";
+        if (File.Exists(fullConfig))
+            stateFile = LoadConfig(fullConfig).GetSection("global").Get("state_file", stateFile);
+        return AnchorPath(fullConfig, stateFile);
+    }
+
+    public static string AnchorPath(string configPath, string path)
+    {
+        if (Path.IsPathRooted(path))
+            return Path.GetFullPath(path);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(configPath));
+        if (string.IsNullOrEmpty(dir))
+            return Path.GetFullPath(path);
+        return Path.GetFullPath(Path.Combine(dir, path));
+    }
+
     public static Dictionary<string, object> LoadConfig(string path)
     {
         var deserializer = new DeserializerBuilder()
