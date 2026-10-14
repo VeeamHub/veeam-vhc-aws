@@ -340,13 +340,8 @@ if ($Upgrade) {
             $logChoice = Read-Host "  Migrate logs to VHC\logs\ subfolder? (y/n) [y]"
             if ($logChoice -ne "n") {
                 $logDir = Join-Path $dataDir "logs"
-                if (-not (Test-Path $logDir)) {
-                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-                }
-                icacls $logDir /inheritance:r | Out-Null
-                icacls $logDir /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
-                # Update the config file path
-                $configText = $configText -replace '(file:\s*")[^"]*\\VHC\\(veeam-vhc-aws)', "`$1$($dataDir -replace '\\', '\\')\\logs\\`$2"
+                Protect-VhcSystemDirectory $logDir
+                $configText = Set-LoggingPathToVhcLogs $configText $dataDir
                 Save-Config $configText
                 # Move existing log files
                 $existingLogs = Get-ChildItem -Path $dataDir -Filter "veeam-vhc-aws*.log" -ErrorAction SilentlyContinue
@@ -518,6 +513,24 @@ try {
 } catch {
     Write-Host "  -> Could not add Defender exclusion (may need manual step if Smart App Control blocks the exe)" -ForegroundColor Yellow
     Write-Host "     Run:  Add-MpPreference -ExclusionPath '$exeDest'" -ForegroundColor Yellow
+}
+
+function Set-LoggingPathToVhcLogs {
+    param(
+        [Parameter(Mandatory)][string]$ConfigText,
+        [Parameter(Mandatory)][string]$DataDir
+    )
+    $escapedDataDir = $DataDir -replace '\\', '\\'
+    return ($ConfigText -replace '(file:\s*")[^"]*\\VHC\\(veeam-vhc-aws)', "`${1}${escapedDataDir}\\logs\\`$2")
+}
+
+function Protect-VhcSystemDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+    icacls $Path /inheritance:r | Out-Null
+    icacls $Path /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
 }
 
 function Read-VerifySslChoice {
@@ -775,8 +788,6 @@ if ($NoSummary) {
 }
 
 # --- 2c. Check interval ---
-# -IntervalMinutes is the schedule. Pressing Enter at the prompt uses 5 minutes.
-# -Upgrade does not rewrite an existing task, so it keeps the interval already registered.
 if ($PSBoundParameters.ContainsKey('IntervalMinutes')) {
     if ($IntervalMinutes -lt 1) {
         Write-Host "ERROR: IntervalMinutes must be a positive integer." -ForegroundColor Red
@@ -804,17 +815,10 @@ if ($PSBoundParameters.ContainsKey('IntervalMinutes')) {
 }
 Write-Host "  -> Check interval: $IntervalMinutes minutes" -ForegroundColor Green
 
-# The scheduled task runs as SYSTEM and trusts this directory (state, logs, UI token).
-# Standard users must not be able to rewrite findings or read the token.
 $dataDir = Join-Path $env:ProgramData "VHC"
 $logDir = Join-Path $dataDir "logs"
-foreach ($aclPath in @($dataDir, $logDir)) {
-    if (-not (Test-Path $aclPath)) {
-        New-Item -ItemType Directory -Path $aclPath -Force | Out-Null
-    }
-    icacls $aclPath /inheritance:r | Out-Null
-    icacls $aclPath /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
-}
+Protect-VhcSystemDirectory $dataDir
+Protect-VhcSystemDirectory $logDir
 $logPath = Join-Path $logDir "veeam-vhc-aws.log"
 $statePath = Join-Path $dataDir "veeam-vhc-aws-state.json"
 

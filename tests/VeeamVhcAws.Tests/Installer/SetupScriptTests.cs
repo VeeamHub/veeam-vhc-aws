@@ -18,6 +18,8 @@ public class SetupScriptTests
     {
         var text = SetupText();
         Assert.DoesNotContain("Users:(OI)(CI)M", text);
+        Assert.Contains("function Protect-VhcSystemDirectory", text);
+        Assert.Contains("function Set-LoggingPathToVhcLogs", text);
         Assert.Contains("NT AUTHORITY\\SYSTEM:(OI)(CI)F", text);
         Assert.Contains("BUILTIN\\Administrators:(OI)(CI)F", text);
     }
