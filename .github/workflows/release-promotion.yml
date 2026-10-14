@@ -4,6 +4,10 @@ name: Release Promotion
 # stopped reaching master, and a security fix sat unshipped for 15 days across
 # two separate PRs. This keeps exactly one dev -> master PR open whenever dev
 # is ahead, so the unshipped gap is always visible and one click from merging.
+#
+# A repository with no master branch cannot promote. Ask the remote before
+# rev-list and skip the promotion steps instead of failing. When master
+# exists, those steps are unchanged.
 
 on:
   push:
@@ -25,7 +29,28 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check whether origin has master
+        id: master
+        run: |
+          # Exit 2 means the remote has no master ref. Any other failure
+          # still fails the job, so a real master is never treated as missing.
+          master_status=0
+          git ls-remote --exit-code --heads origin master >/dev/null || master_status=$?
+          if [ "$master_status" -eq 0 ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$master_status" -eq 2 ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "origin has no master branch. Skipping the remaining promotion steps."
+            echo "::notice title=Release promotion skipped::origin has no master branch. Skipping the remaining promotion steps."
+            exit 0
+          fi
+          echo "Could not query origin for the master branch (git ls-remote exited ${master_status})."
+          exit "$master_status"
+
       - name: Open or refresh the dev -> master PR
+        if: steps.master.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
