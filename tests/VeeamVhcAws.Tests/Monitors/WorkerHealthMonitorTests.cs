@@ -204,4 +204,51 @@ public class WorkerHealthMonitorTests
             f.Message.Contains("recurring", StringComparison.OrdinalIgnoreCase) &&
             f.Message.Contains("credential", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void FailureRate_AlertsWhenLatestSessionSucceeded()
+    {
+        var now = DateTime.UtcNow;
+        var sessions = new List<Dictionary<string, object>>
+        {
+            new() { ["type"] = "BackupSession", ["status"] = "Failed", ["name"] = "policy-a",
+                ["creationTime"] = now.AddHours(-3).ToString("O"),
+                ["result"] = new Dictionary<string, object> { ["message"] = "timeout" } },
+            new() { ["type"] = "BackupSession", ["status"] = "Failed", ["name"] = "policy-a",
+                ["creationTime"] = now.AddHours(-2).ToString("O"),
+                ["result"] = new Dictionary<string, object> { ["message"] = "timeout" } },
+            new() { ["type"] = "BackupSession", ["status"] = "Success", ["name"] = "policy-a",
+                ["creationTime"] = now.AddHours(-1).ToString("O"),
+                ["result"] = new Dictionary<string, object> { ["message"] = "" } },
+        };
+
+        var client = Substitute.For<IVbawsClient>();
+        client.GetSessions(Arg.Any<DateTime>(), Arg.Any<DateTime>()).Returns(sessions);
+        var ctx = new ServerContext("test-server", "vbaws", VbawsClient: client);
+        var result = new WorkerHealthMonitor(DefaultConfig()).Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Contains(result.Findings, f =>
+            f.Severity is Severity.Warning or Severity.Critical &&
+            f.Message.Contains("failure rate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void RetentionSessionFailures_StayQuietBelowTheConfiguredMax()
+    {
+        var sessions = new List<Dictionary<string, object>>
+        {
+            new() { ["type"] = "RetentionSession", ["status"] = "Failed", ["name"] = "policy-a",
+                ["result"] = new Dictionary<string, object> { ["message"] = "worker down" } },
+        };
+        var client = Substitute.For<IVbawsClient>();
+        client.GetSessions(Arg.Any<DateTime>(), Arg.Any<DateTime>()).Returns(sessions);
+        var ctx = new ServerContext("test-server", "vbaws", VbawsClient: client);
+        var result = new WorkerHealthMonitor(DefaultConfig(new()
+        {
+            ["retention_session_max_failures"] = 4,
+        })).Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.DoesNotContain(result.Findings, f =>
+            f.Message.Contains("Retention session failed", StringComparison.Ordinal));
+    }
 }

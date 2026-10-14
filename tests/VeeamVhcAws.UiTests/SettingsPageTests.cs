@@ -31,4 +31,28 @@ public class SettingsPageTests
         Assert.Contains("./ops.log", yaml);
         Assert.DoesNotContain("log_level:", yaml);
     }
+
+    [Fact]
+    public void Save_KeepsRotationKeysTheFormDoesNotEdit()
+    {
+        using var ui = new UiHarness();
+        File.WriteAllText(ui.ConfigPath, """
+            global:
+              timeout_seconds: 30
+              logging:
+                level: DEBUG
+                file: ./veeam-vhc-aws.log
+                rotation_when: midnight
+                rotation_interval: 1
+                rotation_keep: 30
+                console: false
+                disk_warning_pct: 20
+            """);
+        var cut = ui.Context.RenderComponent<Settings>();
+        UiHarness.Click(cut, "Save Settings");
+
+        var yaml = File.ReadAllText(ui.ConfigPath);
+        Assert.Contains("rotation_when: midnight", yaml);
+        Assert.Contains("rotation_interval: 1", yaml);
+    }
 }

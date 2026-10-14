@@ -210,22 +210,32 @@ public class RetentionMonitor : IMonitor
                 findings.Add(new Finding(Severity.Ok, $"vm:{vmName}", "violation metric",
                     metricName: "veeam_retention_violation", metricValue: actualCount > threshold ? 1.0 : 0.0));
             }
-            else // days-based
+            else // days-based: compare oldest point age to quantity * max_age_multiplier
             {
-                var retainDays = quantity;
-                var expectedMax = retainDays + gfsWeekly + gfsMonthly + gfsYearly;
-                var threshold = (int)(expectedMax * overageMultiplier);
-
-                if (actualCount > threshold)
+                var oldest = (DateTime)points[0]["_parsed_time"];
+                var ageDays = Math.Max(0, (now - oldest).TotalDays);
+                var allowedDays = quantity * maxAgeMultiplier;
+                if (gfsEnabled)
                 {
-                    var severity = actualCount > expectedMax * 2 ? Severity.Critical : Severity.Warning;
+                    double gfsDays = 0;
+                    if (gfsWeekly > 0) gfsDays = Math.Max(gfsDays, gfsWeekly * 7);
+                    if (gfsMonthly > 0) gfsDays = Math.Max(gfsDays, gfsMonthly * 31);
+                    if (gfsYearly > 0) gfsDays = Math.Max(gfsDays, gfsYearly * 366);
+                    if (gfsDays > allowedDays) allowedDays = gfsDays;
+                }
+
+                var ageText = ageDays.ToString("F1", CultureInfo.InvariantCulture);
+                var allowedText = allowedDays.ToString("F1", CultureInfo.InvariantCulture);
+                if (ageDays > allowedDays)
+                {
+                    var severity = ageDays > allowedDays * 2 ? Severity.Critical : Severity.Warning;
                     findings.Add(new Finding(severity, $"vm:{vmName}",
-                        $"Retention overage: {actualCount} restore points vs {expectedMax} expected",
+                        $"Retention overage: oldest restore point is {ageText} days vs {allowedText} days allowed",
                         new Dictionary<string, object>
                         {
+                            ["actual_age_days"] = ageDays,
+                            ["allowed_age_days"] = allowedDays,
                             ["actual"] = actualCount,
-                            ["expected"] = expectedMax,
-                            ["threshold"] = threshold,
                             ["job"] = jobInfo["name"],
                             ["gfs"] = gfsEnabled,
                         }));
@@ -233,15 +243,15 @@ public class RetentionMonitor : IMonitor
                 else
                 {
                     findings.Add(new Finding(Severity.Ok, $"vm:{vmName}",
-                        $"Retention OK: {actualCount}/{expectedMax} points"));
+                        $"Retention OK: oldest restore point is {ageText} days (allowed {allowedText})"));
                 }
 
                 findings.Add(new Finding(Severity.Ok, $"vm:{vmName}", "actual points metric",
                     metricName: "veeam_retention_actual_points", metricValue: actualCount));
-                findings.Add(new Finding(Severity.Ok, $"vm:{vmName}", "expected points metric",
-                    metricName: "veeam_retention_expected_points", metricValue: expectedMax));
+                findings.Add(new Finding(Severity.Ok, $"vm:{vmName}", "allowed age metric",
+                    metricName: "veeam_retention_allowed_age_days", metricValue: allowedDays));
                 findings.Add(new Finding(Severity.Ok, $"vm:{vmName}", "violation metric",
-                    metricName: "veeam_retention_violation", metricValue: actualCount > threshold ? 1.0 : 0.0));
+                    metricName: "veeam_retention_violation", metricValue: ageDays > allowedDays ? 1.0 : 0.0));
             }
         }
 

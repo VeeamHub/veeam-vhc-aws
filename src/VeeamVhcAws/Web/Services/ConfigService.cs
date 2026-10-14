@@ -168,6 +168,27 @@ public class ConfigService
         }
     }
 
+    internal static Dictionary<string, object> OverlaySection(
+        Dictionary<string, object> existing,
+        Dictionary<string, object> updates)
+    {
+        var result = new Dictionary<string, object>(existing);
+        foreach (var (key, value) in updates)
+        {
+            if (value is Dictionary<string, object> updateMap &&
+                result.TryGetValue(key, out var current) &&
+                current is Dictionary<string, object> currentMap)
+            {
+                result[key] = OverlaySection(currentMap, updateMap);
+            }
+            else
+            {
+                result[key] = value;
+            }
+        }
+        return result;
+    }
+
     public void SaveMonitorSection(string sectionName, Dictionary<string, object> section)
     {
         lock (_saveLock)
