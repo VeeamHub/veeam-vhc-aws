@@ -276,4 +276,50 @@ public class ConfigBuilderTests
             if (File.Exists(tempFile)) File.Delete(tempFile);
         }
     }
+
+    [Fact]
+    public void Build_WebhookAndEmail_UseHandlerKeys()
+    {
+        var answers = new WizardAnswers
+        {
+            Servers = new List<WizardServer>(),
+            IncludeSlack = true,
+            SlackWebhookUrl = "https://hooks.example/slack",
+            IncludeTeams = true,
+            TeamsWebhookUrl = "https://hooks.example/teams",
+            IncludeNtfy = true,
+            NtfyUrl = "https://ntfy.example/topic",
+            IncludeEmail = true,
+            EmailSmtpHost = "smtp.example",
+            EmailSmtpPort = 587,
+            EmailFrom = "vhc@example",
+            EmailTo = "one@example, two@example",
+            EmailSmtpUsername = "mailer",
+            EmailSmtpPassword = "smtp-secret",
+        };
+
+        var dict = ConfigBuilder.Build(answers);
+        var outputs = (List<object>)dict["output"];
+        var sections = outputs.Cast<Dictionary<string, object>>().ToList();
+
+        var slack = sections.Single(s => s.TryGetValue("url", out var url) && url?.ToString() == "https://hooks.example/slack");
+        Assert.Equal("slack", slack["template"].ToString());
+        Assert.False(slack.ContainsKey("format"));
+
+        Assert.Equal("teams", sections.Single(s => s.TryGetValue("url", out var url) && url?.ToString() == "https://hooks.example/teams")["template"].ToString());
+        Assert.Equal("ntfy", sections.Single(s => s.TryGetValue("url", out var url) && url?.ToString() == "https://ntfy.example/topic")["template"].ToString());
+
+        var email = sections.Single(s => s["type"].ToString() == "email");
+        Assert.Equal("vhc@example", email["from_addr"].ToString());
+        Assert.False(email.ContainsKey("from"));
+        Assert.False(email.ContainsKey("to"));
+        Assert.True(Convert.ToBoolean(email["use_tls"]));
+
+        var recipients = ((List<string>)email["to_addrs"]).Select(a => a.Trim()).ToList();
+        Assert.Equal(new[] { "one@example", "two@example" }, recipients);
+
+        var stored = email["smtp_password"].ToString()!;
+        Assert.StartsWith("ENC:", stored, StringComparison.Ordinal);
+        Assert.Equal("smtp-secret", PasswordObfuscator.Deobfuscate(stored));
+    }
 }
