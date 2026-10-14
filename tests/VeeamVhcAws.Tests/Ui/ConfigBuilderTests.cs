@@ -224,6 +224,16 @@ public class ConfigBuilderTests
     }
 
     [Fact]
+    public void Build_DailySummary_WritesTheEnabledFlag()
+    {
+        var enabled = ConfigBuilder.Build(new WizardAnswers { DailySummaryEnabled = true });
+        var disabled = ConfigBuilder.Build(new WizardAnswers { DailySummaryEnabled = false });
+
+        Assert.Equal(true, ((Dictionary<string, object>)enabled["daily_summary"])["enabled"]);
+        Assert.Equal(false, ((Dictionary<string, object>)disabled["daily_summary"])["enabled"]);
+    }
+
+    [Fact]
     public void Build_ToYaml_DoesNotThrow()
     {
         var servers = new List<WizardServer>

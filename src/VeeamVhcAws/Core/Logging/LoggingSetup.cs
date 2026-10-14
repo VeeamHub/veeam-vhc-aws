@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using Serilog;
+using Serilog.Core;
 using Serilog.Events;
 using VeeamVhcAws.Core.Config;
 
@@ -36,32 +38,11 @@ public static class LoggingSetup
             .MinimumLevel.Is(level)
             .Enrich.WithProperty("Application", "veeam-vhc-aws");
 
-        // File sink with daily rolling
-        // Serilog inserts the date before the extension (e.g. "app.log" → "app20260402.log").
-        // Rewrite the path so there's a dash separator: "app.log" → "app-.log" → "app-20260402.log".
-        try
-        {
-            var logDir = Path.GetDirectoryName(Path.GetFullPath(logFile));
-            if (!string.IsNullOrEmpty(logDir))
-                Directory.CreateDirectory(logDir);
-
-            var baseName = Path.GetFileNameWithoutExtension(logFile);
-            var ext = Path.GetExtension(logFile);
-            var rollingPath = Path.Combine(
-                Path.GetDirectoryName(logFile) ?? ".",
-                baseName + "-" + ext);
-
-            logConfig = logConfig.WriteTo.File(
-                rollingPath,
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: rotationKeep,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level,-8:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
-                encoding: System.Text.Encoding.UTF8);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[veeam-vhc-aws] WARNING: File logging could not be configured for '{logFile}': {ex.Message}. Falling back to console only.");
-        }
+        var chosen = ChooseWritableLogFile(logFile, out var primaryError);
+        if (chosen is not null)
+            logConfig = AttachFileSink(logConfig, chosen, rotationKeep);
+        else
+            logConfig = logConfig.WriteTo.Sink(new WindowsEventLogSink());
 
         // Console sink
         if (consoleEnabled && Console.Error != null)
@@ -73,7 +54,121 @@ public static class LoggingSetup
 
         Log.Logger = logConfig.CreateLogger();
 
-        CheckLogDiskSpace(logFile, diskWarningPct);
+        if (primaryError is not null && chosen is not null)
+            Log.Warning("File logging could not use {Configured}: {Error}. Writing to {Fallback} instead.", logFile, primaryError, chosen);
+        else if (primaryError is not null)
+            Log.Warning("File logging could not use {Configured}: {Error}. Writing to the Windows Event Log.", logFile, primaryError);
+
+        if (chosen is not null)
+            CheckLogDiskSpace(chosen, diskWarningPct);
+    }
+
+    internal static string? FallbackDirectoryOverride { get; set; }
+
+    internal static string FallbackLogFile()
+    {
+        var root = FallbackDirectoryOverride;
+        if (string.IsNullOrEmpty(root))
+        {
+            root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrEmpty(root))
+                root = Path.GetTempPath();
+        }
+        return Path.Combine(root, "VHC", "logs", "veeam-vhc-aws.log");
+    }
+
+    private static string? ChooseWritableLogFile(string configured, out string? primaryError)
+    {
+        if (TryPrepareFile(configured, out primaryError))
+        {
+            primaryError = null;
+            return configured;
+        }
+
+        var fallback = FallbackLogFile();
+        if (!PathsEqual(fallback, configured) && TryPrepareFile(fallback, out _))
+            return fallback;
+        return null;
+    }
+
+    private static bool PathsEqual(string left, string right)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static bool TryPrepareFile(string logFile, out string? error)
+    {
+        try
+        {
+            var full = Path.GetFullPath(logFile);
+            var logDir = Path.GetDirectoryName(full);
+            if (string.IsNullOrEmpty(logDir))
+            {
+                error = "The log path has no directory.";
+                return false;
+            }
+            Directory.CreateDirectory(logDir);
+            var probe = Path.Combine(logDir, ".veeam-vhc-aws-write-probe");
+            File.WriteAllText(probe, "ok");
+            File.Delete(probe);
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static LoggerConfiguration AttachFileSink(LoggerConfiguration logConfig, string logFile, int rotationKeep)
+    {
+        // Serilog inserts the date before the extension (e.g. "app.log" → "app20260402.log").
+        // Rewrite the path so there's a dash separator: "app.log" → "app-.log" → "app-20260402.log".
+        var baseName = Path.GetFileNameWithoutExtension(logFile);
+        var ext = Path.GetExtension(logFile);
+        var rollingPath = Path.Combine(Path.GetDirectoryName(logFile) ?? ".", baseName + "-" + ext);
+        return logConfig.WriteTo.File(
+            rollingPath,
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: rotationKeep,
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss} [{Level,-8:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
+            encoding: System.Text.Encoding.UTF8);
+    }
+
+    private sealed class WindowsEventLogSink : ILogEventSink
+    {
+        public void Emit(LogEvent logEvent)
+        {
+            if (!OperatingSystem.IsWindows())
+                return;
+
+            var message = logEvent.RenderMessage(System.Globalization.CultureInfo.InvariantCulture);
+            if (logEvent.Exception is not null)
+                message += Environment.NewLine + logEvent.Exception;
+            var type = logEvent.Level switch
+            {
+                LogEventLevel.Error or LogEventLevel.Fatal => EventLogEntryType.Error,
+                LogEventLevel.Warning => EventLogEntryType.Warning,
+                _ => EventLogEntryType.Information,
+            };
+            try
+            {
+                EventLog.WriteEntry("Application", message, type);
+            }
+            catch (Exception ex)
+            {
+                var spare = Path.Combine(Path.GetTempPath(), "veeam-vhc-aws-eventlog.log");
+                File.AppendAllText(spare, message + Environment.NewLine + ex + Environment.NewLine);
+            }
+        }
     }
 
     /// <summary>

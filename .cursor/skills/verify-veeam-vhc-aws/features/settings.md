@@ -6,7 +6,7 @@ Settings edits the `global` and `daily_summary` sections. The page also shows th
 
 - `settings-labels` gives every field an accessible name, including the number boxes.
 - `settings-save` writes the log level and log file, then shows them again after a reload.
-- `settings-daily` toggles the daily summary checkbox. The schedule itself stays on the task, not this page.
+- `settings-daily` toggles the daily summary checkbox and writes `daily_summary.enabled`. On Windows, saving also registers or removes the scheduled task `Veeam VHC AWS Daily Summary`. On any other OS the save only writes the flag. The time of day stays on the task.
 
 ## How to get to it (user POV)
 
@@ -30,4 +30,4 @@ Preconditions:
 - The Files table is read-only. The state path is where Alerts and Captures read `veeam-vhc-aws-state.json` unless `global.state_file` says otherwise. Under this helper that path is the project directory, because `dotnet run` sets the working directory there.
 - Number boxes use `for` and `id`. `fill --label` uses the label text.
 - Saving writes the logging map and the HTTP keys together. A field you did not edit is still written at the value shown on the page. The monitor reads `logging.level`. A save does not also write `global.log_level`.
-- The daily summary line says the time is controlled by the scheduled task.
+- The daily summary line says the time is controlled by the scheduled task. A save on Linux or macOS still writes `enabled: true` or `enabled: false`. The flash stays `Settings saved` because this machine has no Task Scheduler. On Windows the flash adds `Daily summary task registered.` or `Daily summary task removed.`

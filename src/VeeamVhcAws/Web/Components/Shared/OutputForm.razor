@@ -58,7 +58,7 @@
         EnsureDefaults();
     }
 
-    private string Get(string key) => _fields.GetValueOrDefault(key)?.ToString() ?? "";
+    private string Get(string key) => OutputFieldText.Format(_fields.GetValueOrDefault(key));
     private int GetInt(string key, int dflt) =>
         int.TryParse(_fields.GetValueOrDefault(key)?.ToString(), out var i) ? i : dflt;
     private bool GetBool(string key) =>

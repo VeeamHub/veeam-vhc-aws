@@ -1,4 +1,5 @@
 using Spectre.Console;
+using VeeamVhcAws.Scheduling;
 
 namespace VeeamVhcAws.Ui;
 
@@ -205,6 +206,11 @@ public static class SetupWizard
         answers.SessionLookbackHours = AnsiConsole.Ask("Session lookback (hours):", 24);
 
         AnsiConsole.WriteLine();
+        answers.DailySummaryEnabled = AnsiConsole.Confirm("Enable the daily health summary?", true);
+        if (answers.DailySummaryEnabled)
+            answers.DailySummaryTime = AnsiConsole.Ask("Daily summary time (HH:mm)", DailySummaryTaskSync.DefaultTime);
+
+        AnsiConsole.WriteLine();
     }
 
     private static void RunStep7_Review(WizardAnswers answers, string outputPath)
@@ -228,6 +234,7 @@ public static class SetupWizard
         table.AddRow("Overage multiplier", answers.OverageMultiplier.ToString("F1"));
         table.AddRow("Orphan detection", answers.OrphanDetection ? "Enabled" : "Disabled");
         table.AddRow("Session lookback", $"{answers.SessionLookbackHours}h");
+        table.AddRow("Daily summary", answers.DailySummaryEnabled ? $"Enabled at {answers.DailySummaryTime}" : "Disabled");
         table.AddRow("Output path", outputPath);
 
         AnsiConsole.Write(table);
@@ -252,6 +259,22 @@ public static class SetupWizard
         var fullPath = Path.GetFullPath(outputPath);
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[green]Configuration saved to:[/] {fullPath.EscapeMarkup()}");
+        try
+        {
+            var outcome = DailySummaryTaskSync.Apply(
+                answers.DailySummaryEnabled,
+                DailySummaryTasks.CreateDefault(),
+                fullPath,
+                answers.DailySummaryTime);
+            if (outcome == "registered")
+                AnsiConsole.MarkupLine("[green]Daily summary task registered.[/]");
+            else if (outcome == "unregistered")
+                AnsiConsole.MarkupLine("[grey]Daily summary task removed.[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Daily summary task was not updated:[/] {ex.Message.EscapeMarkup()}");
+        }
         AnsiConsole.WriteLine();
 
         // Next steps

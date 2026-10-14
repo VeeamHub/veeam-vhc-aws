@@ -59,14 +59,18 @@ public static class EncryptConfigCommand
                 count++;
             }
 
-            if (count == 0)
+            var emailEdits = LegacyEmailKeys.MigrateLines(lines);
+            if (count == 0 && emailEdits == 0)
             {
                 Console.WriteLine("No plaintext or legacy passwords found.");
                 return;
             }
 
             File.WriteAllLines(path, lines);
-            Console.WriteLine($"Protected {count} password(s) in {path}");
+            if (count > 0)
+                Console.WriteLine($"Protected {count} password(s) in {path}");
+            if (emailEdits > 0)
+                Console.WriteLine($"Migrated {emailEdits} legacy email key(s) in {path}");
         }, configOption);
 
         return command;

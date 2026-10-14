@@ -1,4 +1,5 @@
 using Bunit;
+using VeeamVhcAws.Core.Output;
 using OutputsPage = VeeamVhcAws.Web.Components.Pages.Outputs;
 
 namespace VeeamVhcAws.UiTests;
@@ -67,5 +68,37 @@ public class OutputsPageTests
         UiHarness.Click(cut, "Confirm delete");
         Assert.Contains("Output handler deleted", cut.Markup);
         Assert.Contains("No output handlers configured.", cut.Markup);
+    }
+
+    [Fact]
+    public void JsonStdoutOnly_ShowsTheScheduledTaskWarning()
+    {
+        using var ui = new UiHarness(writeConfig: false);
+        File.WriteAllText(ui.ConfigPath, "output:\n  - type: json_stdout\n");
+        var cut = ui.Context.RenderComponent<OutputsPage>();
+
+        Assert.Contains(StdoutOnlyOutput.Warning, cut.Markup);
+    }
+
+    [Fact]
+    public void EmailList_ShowsAddressesInsteadOfTheListType()
+    {
+        using var ui = new UiHarness(writeConfig: false);
+        File.WriteAllText(ui.ConfigPath, """
+            output:
+              - type: email
+                smtp_host: mail.example.com
+                from_addr: vhc@example.com
+                to_addrs:
+                  - ops@example.com
+                  - oncall@example.com
+            """);
+        var cut = ui.Context.RenderComponent<OutputsPage>();
+        UiHarness.Click(cut, "Edit email 1");
+
+        Assert.Equal("ops@example.com, oncall@example.com", cut.Find("#output-to").GetAttribute("value"));
+        Assert.Equal("vhc@example.com", cut.Find("#output-from").GetAttribute("value"));
+        Assert.Contains("to_addrs=ops@example.com, oncall@example.com", cut.Markup);
+        Assert.DoesNotContain("List`1", cut.Markup);
     }
 }

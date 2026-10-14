@@ -2,6 +2,8 @@
 @rendermode InteractiveServer
 @inject ConfigService Config
 @inject StateService State
+@inject IDailySummaryTaskHost Tasks
+@using VeeamVhcAws.Scheduling
 
 <PageTitle>Settings — Veeam VHC AWS</PageTitle>
 
@@ -82,7 +84,7 @@ else
     <section class="form-section">
         <h2>Daily Summary</h2>
         <div class="form-row">
-            <label><input type="checkbox" @bind="_dailySummaryEnabled" /> Enable daily summary email/notification</label>
+            <label for="settings-daily-summary"><input id="settings-daily-summary" type="checkbox" @bind="_dailySummaryEnabled" /> Enable daily summary email/notification</label>
         </div>
         <p class="muted">Time is controlled by the scheduled task, not this config.</p>
     </section>
@@ -201,7 +203,20 @@ else
         };
         Config.SaveMonitorSection("daily_summary", dailySummary);
 
-        _flash = "Settings saved";
+        try
+        {
+            var outcome = DailySummaryTaskSync.Apply(_dailySummaryEnabled, Tasks, _cfg.ConfigPath, DailySummaryTaskSync.DefaultTime);
+            _flash = outcome switch
+            {
+                "registered" => "Settings saved. Daily summary task registered.",
+                "unregistered" => "Settings saved. Daily summary task removed.",
+                _ => "Settings saved",
+            };
+        }
+        catch (Exception ex)
+        {
+            _flash = "Settings saved. Daily summary task was not updated: " + ex.Message;
+        }
         _cfg = Config.Load();
         Load();
     }

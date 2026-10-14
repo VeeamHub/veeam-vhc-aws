@@ -48,6 +48,9 @@ public class WizardAnswers
     public double OverageMultiplier { get; set; } = 1.5;
     public bool OrphanDetection { get; set; } = true;
     public int SessionLookbackHours { get; set; } = 24;
+
+    public bool DailySummaryEnabled { get; set; }
+    public string DailySummaryTime { get; set; } = "08:00";
 }
 
 /// <summary>
@@ -160,6 +163,11 @@ public static class ConfigBuilder
         {
             ["enabled"] = true,
             ["lookback_hours"] = 24,
+        };
+
+        config["daily_summary"] = new Dictionary<string, object>
+        {
+            ["enabled"] = answers.DailySummaryEnabled,
         };
 
         return config;

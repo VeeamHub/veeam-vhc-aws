@@ -142,6 +142,7 @@ public static class ConfigLoader
                 $"(use single quotes or escape backslashes as \\\\).{line}", ex);
         }
 
+        LegacyEmailKeys.Migrate(raw);
         var config = DeepMerge(Defaults, raw);
         ApplyEnvServers(config);
         return config;
@@ -150,8 +151,10 @@ public static class ConfigLoader
     /// <summary>
     /// Normalizes bare backslashes in YAML double-quoted strings so that
     /// Windows paths and complex passwords don't require manual escaping.
-    /// YamlDotNet treats \u, \U, \x as Unicode/hex escapes; this doubles any
-    /// backslash that doesn't form a valid YAML escape sequence.
+    /// A drive or UNC path is rewritten with literal backslashes, because
+    /// YAML treats \P and \v as paragraph-separator and vertical-tab escapes
+    /// and would otherwise corrupt C:\ProgramData\...\veeam-vhc-aws.log.
+    /// Other double-quoted scalars still double only invalid YAML escapes.
     /// </summary>
     internal static string NormalizeBackslashes(string yaml)
     {
@@ -188,32 +191,42 @@ public static class ConfigLoader
             }
             else if (c == '"')
             {
-                // Double-quoted scalar: normalize invalid backslash escapes.
-                sb.Append(c);
-                i++;
-                while (i < yaml.Length && yaml[i] != '"')
+                var close = FindClosingDoubleQuote(yaml, i);
+                if (close > i && IsWindowsPathScalar(yaml, i + 1, close))
                 {
-                    if (yaml[i] == '\\' && i + 1 < yaml.Length)
+                    sb.Append('"');
+                    AppendLiteralBackslashes(sb, yaml, i + 1, close);
+                    sb.Append('"');
+                    i = close + 1;
+                }
+                else
+                {
+                    sb.Append(c);
+                    i++;
+                    while (i < yaml.Length && yaml[i] != '"')
                     {
-                        if (IsValidYamlEscape(yaml, i))
+                        if (yaml[i] == '\\' && i + 1 < yaml.Length)
                         {
-                            sb.Append(yaml[i++]);
-                            sb.Append(yaml[i++]);
+                            if (IsValidYamlEscape(yaml, i))
+                            {
+                                sb.Append(yaml[i++]);
+                                sb.Append(yaml[i++]);
+                            }
+                            else
+                            {
+                                sb.Append('\\');
+                                sb.Append('\\');
+                                i++;
+                            }
                         }
                         else
                         {
-                            sb.Append('\\');
-                            sb.Append('\\');
-                            i++;
+                            sb.Append(yaml[i++]);
                         }
                     }
-                    else
-                    {
+                    if (i < yaml.Length)
                         sb.Append(yaml[i++]);
-                    }
                 }
-                if (i < yaml.Length)
-                    sb.Append(yaml[i++]); // closing "
             }
             else
             {
@@ -222,6 +235,54 @@ public static class ConfigLoader
         }
 
         return sb.ToString();
+    }
+
+    private static int FindClosingDoubleQuote(string yaml, int openQuote)
+    {
+        var i = openQuote + 1;
+        while (i < yaml.Length)
+        {
+            if (yaml[i] == '"')
+            {
+                var slashes = 0;
+                var k = i - 1;
+                while (k > openQuote && yaml[k] == '\\')
+                {
+                    slashes++;
+                    k--;
+                }
+                if (slashes % 2 == 0)
+                    return i;
+            }
+            i++;
+        }
+        return -1;
+    }
+
+    private static bool IsWindowsPathScalar(string yaml, int start, int end)
+    {
+        var length = end - start;
+        if (length >= 3 && char.IsLetter(yaml[start]) && yaml[start + 1] == ':' && yaml[start + 2] == '\\')
+            return true;
+        return length >= 2 && yaml[start] == '\\' && yaml[start + 1] == '\\';
+    }
+
+    private static void AppendLiteralBackslashes(StringBuilder sb, string yaml, int start, int end)
+    {
+        var i = start;
+        while (i < end)
+        {
+            if (yaml[i] == '\\')
+            {
+                sb.Append('\\');
+                sb.Append('\\');
+                i += i + 1 < end && yaml[i + 1] == '\\' ? 2 : 1;
+            }
+            else
+            {
+                sb.Append(yaml[i++]);
+            }
+        }
     }
 
     private static bool IsValidYamlEscape(string s, int pos)

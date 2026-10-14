@@ -41,4 +41,33 @@ public class SetupScriptTests
         Assert.Contains("default: 5", text);
         Assert.Contains("PSBoundParameters.ContainsKey('IntervalMinutes')", text);
     }
+
+    [Fact]
+    public void LogPath_IsSingleQuotedWithForwardSlashes()
+    {
+        var text = SetupText();
+        Assert.Contains("$logYaml = $logPath -replace '\\\\', '/'", text);
+        Assert.Contains("file: '$logYaml'", text);
+        Assert.DoesNotContain("file: \"$($logPath", text);
+    }
+
+    [Fact]
+    public void DailySummaryTask_UsesTheFailureAlertWrapper()
+    {
+        var text = SetupText();
+        Assert.Contains("-Action register-daily", text);
+        Assert.DoesNotContain("-Argument \"summary --config", text);
+
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "scripts", "vhc-tasks.ps1")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var script = File.ReadAllText(Path.Combine(dir!.FullName, "scripts", "vhc-tasks.ps1"));
+        Assert.Contains("Veeam VHC AWS Daily Summary", script);
+        Assert.Contains("-Command $Cmd", script);
+        Assert.Contains("-Cmd 'summary'", script);
+        Assert.Contains("if ($code -ne 0)", script);
+        Assert.Contains("Invoke-WebRequest", script);
+        Assert.Contains("exit $code", script);
+    }
 }

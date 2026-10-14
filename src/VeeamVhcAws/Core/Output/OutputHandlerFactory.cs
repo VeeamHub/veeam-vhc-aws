@@ -7,7 +7,6 @@ public static class OutputHandlerFactory
 {
     private static readonly Dictionary<string, Func<Dictionary<string, object>, IOutputHandler>> Registry = new()
     {
-        ["json_stdout"] = _ => new JsonStdoutHandler(),
         ["json_file"] = cfg => new JsonFileHandler(
             cfg.Get("path", "/var/log/veeam-vhc-aws.json"),
             cfg.Get("rotate", false),
@@ -54,15 +53,35 @@ public static class OutputHandlerFactory
                 new() { ["type"] = "json_stdout" }
             };
 
+        var onlyStdout = outputConfigs.All(entry =>
+            string.Equals(entry.Get("type", "json_stdout"), "json_stdout", StringComparison.OrdinalIgnoreCase));
+
         var handlers = new List<IOutputHandler>();
         foreach (var entry in outputConfigs)
         {
             var handlerType = entry.Get("type", "json_stdout");
+            if (handlerType == "json_stdout")
+            {
+                handlers.Add(new JsonStdoutHandler { WarnWhenDiscarded = onlyStdout });
+                continue;
+            }
             if (!Registry.TryGetValue(handlerType, out var factory))
                 throw new InvalidOperationException($"Unknown output handler type: {handlerType}");
 
             handlers.Add(factory(entry));
         }
         return handlers;
+    }
+}
+
+public static class StdoutOnlyOutput
+{
+    public const string Warning =
+        "JSON stdout is the only output handler. A scheduled task discards stdout, so this run will not deliver findings. Add email, a webhook, or a JSON file.";
+
+    public static bool IsOnly(IEnumerable<string> types)
+    {
+        var list = types as IReadOnlyList<string> ?? types.ToList();
+        return list.Count > 0 && list.All(type => string.Equals(type, "json_stdout", StringComparison.OrdinalIgnoreCase));
     }
 }

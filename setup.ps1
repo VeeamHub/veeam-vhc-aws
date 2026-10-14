@@ -242,34 +242,10 @@ if ($Upgrade) {
                 Save-Config $configText
                 Write-Host "  -> daily_summary added to config" -ForegroundColor Green
 
-                # Create the scheduled task
-                $dsTaskName = "Veeam VHC AWS Daily Summary"
-                $dsAction = New-ScheduledTaskAction `
-                    -Execute $exeDest `
-                    -Argument "summary --config `"$configPath`"" `
-                    -WorkingDirectory $InstallDir
-                try {
-                    $dsTrigger = New-ScheduledTaskTrigger -Daily -At $dsTime
-                } catch {
-                    Write-Host "  WARNING: Invalid time '$dsTime', defaulting to 08:00" -ForegroundColor Yellow
-                    $dsTime = "08:00"
-                    $dsTrigger = New-ScheduledTaskTrigger -Daily -At $dsTime
-                }
-                $dsSettings = New-ScheduledTaskSettingsSet `
-                    -StartWhenAvailable -DontStopOnIdleEnd `
-                    -ExecutionTimeLimit (New-TimeSpan -Hours 6)
-                $dsPrincipal = New-ScheduledTaskPrincipal `
-                    -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-
-                if (Get-ScheduledTask -TaskName $dsTaskName -ErrorAction SilentlyContinue) {
-                    Unregister-ScheduledTask -TaskName $dsTaskName -Confirm:$false
-                }
-                Register-ScheduledTask `
-                    -TaskName $dsTaskName -Action $dsAction -Trigger $dsTrigger `
-                    -Settings $dsSettings -Principal $dsPrincipal `
-                    -Description "Daily Veeam VHC AWS health summary at $dsTime" | Out-Null
-
-                Write-Host "  -> Scheduled task '$dsTaskName' created (daily at $dsTime)" -ForegroundColor Green
+                $taskScript = Join-Path $PSScriptRoot "scripts\vhc-tasks.ps1"
+                & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
+                & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeDest -ConfigPath $configPath -Time $dsTime -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
+                Write-Host "  -> Scheduled task 'Veeam VHC AWS Daily Summary' created (daily at $dsTime)" -ForegroundColor Green
                 $anyUpdates = $true
             } else {
                 Write-Host "  -> Skipped. Enable later by adding 'daily_summary:' to $configPath" -ForegroundColor DarkGray
@@ -520,8 +496,8 @@ function Set-LoggingPathToVhcLogs {
         [Parameter(Mandatory)][string]$ConfigText,
         [Parameter(Mandatory)][string]$DataDir
     )
-    $escapedDataDir = $DataDir -replace '\\', '\\'
-    return ($ConfigText -replace '(file:\s*")[^"]*\\VHC\\(veeam-vhc-aws)', "`${1}${escapedDataDir}\\logs\\`$2")
+    $forward = (($DataDir -replace '\\', '/') + '/logs/veeam-vhc-aws.log')
+    return ($ConfigText -replace '(?m)^(\s*)file:\s*[''"][^''"]*[/\\]VHC[/\\]veeam-vhc-aws[^''"]*[''"]', "`${1}file: '$forward'")
 }
 
 function Protect-VhcSystemDirectory {
@@ -821,6 +797,8 @@ Protect-VhcSystemDirectory $dataDir
 Protect-VhcSystemDirectory $logDir
 $logPath = Join-Path $logDir "veeam-vhc-aws.log"
 $statePath = Join-Path $dataDir "veeam-vhc-aws-state.json"
+$logYaml = $logPath -replace '\\', '/'
+$stateYaml = $statePath -replace '\\', '/'
 
 $configContent = @"
 # Veeam VHC AWS configuration
@@ -832,10 +810,10 @@ global:
   retry_delay_seconds: 5
   page_size: 500
   max_pages: 100
-  state_file: "$($statePath -replace '\\', '\\')"
+  state_file: '$stateYaml'
   logging:
     level: INFO
-    file: "$($logPath -replace '\\', '\\')"
+    file: '$logYaml'
     rotation_when: midnight
     rotation_interval: 1
     rotation_keep: 30
@@ -904,11 +882,6 @@ Write-Host "[3/5] Creating scheduled task" -ForegroundColor Yellow
 
 $taskName = "Veeam VHC AWS"
 $exeFullPath = Join-Path $InstallDir "veeam-vhc-aws.exe"
-$taskAction = New-ScheduledTaskAction `
-    -Execute $exeFullPath `
-    -Argument "all --config `"$configPath`"" `
-    -WorkingDirectory $InstallDir
-
 $taskTrigger = New-ScheduledTaskTrigger `
     -Once `
     -At (Get-Date) `
@@ -931,35 +904,21 @@ if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
     Write-Host "  -> Removed existing '$taskName' task" -ForegroundColor Yellow
 }
 
-# Write failure-alerting wrapper script
-$wrapperPath = Join-Path $InstallDir "Run-VhcAws.ps1"
-$alertUrlEscaped = if ($AlertUrl) { $AlertUrl } else { "" }
-$wrapperContent = @"
-# VHC AWS Monitor wrapper -- alerts on task failure
-`$exePath = Join-Path `$PSScriptRoot "veeam-vhc-aws.exe"
-`$configPath = Join-Path `$PSScriptRoot "veeam-vhc-aws.yaml"
-& `$exePath all --config `$configPath
-if (`$LASTEXITCODE -ne 0) {
-    `$alertUrl = "$alertUrlEscaped"  # substituted during setup
-    if (`$alertUrl) {
-        `$body = "VHC AWS scheduled task failed with exit code `$LASTEXITCODE on `$env:COMPUTERNAME"
-        try {
-            Invoke-WebRequest -Uri `$alertUrl -Method Post -Body `$body -UseBasicParsing -ErrorAction Stop | Out-Null
-        } catch {
-            Write-Warning "Failed to send failure alert: `$_"
-        }
-    }
+$taskScript = Join-Path $PSScriptRoot "scripts\vhc-tasks.ps1"
+if (-not (Test-Path $taskScript)) {
+    Write-Host "ERROR: $taskScript is missing. The scheduled tasks need it." -ForegroundColor Red
+    exit 1
 }
-"@
-[IO.File]::WriteAllText($wrapperPath, $wrapperContent, [System.Text.UTF8Encoding]::new($false))
+$alertUrlEscaped = if ($AlertUrl) { $AlertUrl } else { "" }
+$wrapperPath = & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $alertUrlEscaped
+$wrapperArgs = & $taskScript -Action task-argument -InstallDir $InstallDir -Command all -ConfigPath $configPath
 if ($AlertUrl) {
     Write-Host "  -> Failure alerting: wrapper script at $wrapperPath" -ForegroundColor Green
 }
 
-# Update task action to use the wrapper script
 $taskAction = New-ScheduledTaskAction `
     -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-    -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$wrapperPath`"" `
+    -Argument $wrapperArgs `
     -WorkingDirectory $InstallDir
 
 Register-ScheduledTask `
@@ -972,36 +931,11 @@ Register-ScheduledTask `
 
 Write-Host "  -> Scheduled task '$taskName' created (every $IntervalMinutes min)" -ForegroundColor Green
 
-# --- 3b. Daily summary scheduled task ---
 if ($setupSummary) {
-    $summaryTaskName = "Veeam VHC AWS Daily Summary"
-    $summaryAction = New-ScheduledTaskAction `
-        -Execute $exeFullPath `
-        -Argument "summary --config `"$configPath`"" `
-        -WorkingDirectory $InstallDir
-
-    try {
-        $summaryTrigger = New-ScheduledTaskTrigger -Daily -At $summaryTimeVal
-    } catch {
-        Write-Host "  WARNING: Invalid time '$summaryTimeVal', defaulting to 08:00" -ForegroundColor Yellow
-        $summaryTimeVal = "08:00"
-        $summaryTrigger = New-ScheduledTaskTrigger -Daily -At $summaryTimeVal
-    }
-
-    if (Get-ScheduledTask -TaskName $summaryTaskName -ErrorAction SilentlyContinue) {
-        Unregister-ScheduledTask -TaskName $summaryTaskName -Confirm:$false
-        Write-Host "  -> Removed existing '$summaryTaskName' task" -ForegroundColor Yellow
-    }
-
-    Register-ScheduledTask `
-        -TaskName $summaryTaskName `
-        -Action $summaryAction `
-        -Trigger $summaryTrigger `
-        -Settings $taskSettings `
-        -Principal $taskPrincipal `
-        -Description "Daily Veeam VHC AWS health summary at $summaryTimeVal" | Out-Null
-
-    Write-Host "  -> Daily summary task '$summaryTaskName' created (daily at $summaryTimeVal)" -ForegroundColor Green
+    & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeFullPath -ConfigPath $configPath -Time $summaryTimeVal -AlertUrl $alertUrlEscaped
+    Write-Host "  -> Daily summary task 'Veeam VHC AWS Daily Summary' created (daily at $summaryTimeVal)" -ForegroundColor Green
+} else {
+    & $taskScript -Action unregister-daily
 }
 
 # --- 4. Run once to test ---

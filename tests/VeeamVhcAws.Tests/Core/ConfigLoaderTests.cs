@@ -96,9 +96,6 @@ public class ConfigLoaderTests
     [Theory]
     [InlineData(@"username: ""DOMAIN\Username""", @"username: ""DOMAIN\\Username""")]
     [InlineData(@"password: ""P@ss\word!""", @"password: ""P@ss\\word!""")]
-    // \U (Users) and \D (Desktop) are invalid YAML escapes → doubled.
-    // \a (adam) IS a valid YAML escape (bell char) → left as-is per spec.
-    [InlineData("path: \"C:\\Users\\adam\\Desktop\"", "path: \"C:\\\\Users\\adam\\\\Desktop\"")]
     public void NormalizeBackslashes_EscapesBareBackslashInDoubleQuoted(string input, string expected)
     {
         var result = ConfigLoader.NormalizeBackslashes(input);
@@ -139,6 +136,35 @@ public class ConfigLoaderTests
         var input = "key: \"\\u0041\"";
         var result = ConfigLoader.NormalizeBackslashes(input);
         Assert.Equal(input, result);
+    }
+
+    [Fact]
+    public void NormalizeBackslashes_DoubleQuotedWindowsPath_DoublesEveryBackslash()
+    {
+        var input = "path: \"C:\\Users\\adam\\Desktop\"";
+        var result = ConfigLoader.NormalizeBackslashes(input);
+        Assert.Equal("path: \"C:\\\\Users\\\\adam\\\\Desktop\"", result);
+    }
+
+    [Fact]
+    public void LoadConfig_DoubleQuotedWindowsLogPath_KeepsBackslashesLiteral()
+    {
+        var dir = Directory.CreateTempSubdirectory("vhc-yaml-");
+        var path = Path.Combine(dir.FullName, "veeam-vhc-aws.yaml");
+        var expected = @"C:\ProgramData\VHC\logs\veeam-vhc-aws.log";
+        File.WriteAllText(path, "global:\n  logging:\n    file: \"" + expected + "\"\n");
+        try
+        {
+            var loaded = ConfigLoader.LoadConfig(path);
+            var file = loaded.GetSection("global").GetSection("logging").Get("file", "");
+            Assert.Equal(expected, file);
+            Assert.DoesNotContain("\u2029", file);
+            Assert.DoesNotContain("\u000B", file);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 
     [Fact]

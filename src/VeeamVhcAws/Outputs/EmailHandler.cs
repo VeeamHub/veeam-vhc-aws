@@ -9,7 +9,7 @@ namespace VeeamVhcAws.Outputs;
 
 public class EmailHandler : IOutputHandler
 {
-    private static readonly ILogger Logger = Log.ForContext<EmailHandler>();
+    private static ILogger Logger => Log.ForContext<EmailHandler>();
 
     private static readonly Dictionary<Severity, string> SeverityColors = new()
     {
@@ -167,17 +167,17 @@ public class EmailHandler : IOutputHandler
         var isSummary = results.IsSummary();
         var html = BuildHtml(results);
 
-        var message = new MimeMessage();
-        message.From.Add(MailboxAddress.Parse(_fromAddr));
-        foreach (var addr in _toAddrs)
-            message.To.Add(MailboxAddress.Parse(addr));
-        message.Subject = isSummary ? "Daily Veeam VHC AWS Summary" : "Veeam VHC AWS Alert";
-
-        var bodyBuilder = new BodyBuilder { HtmlBody = html };
-        message.Body = bodyBuilder.ToMessageBody();
-
         try
         {
+            var message = new MimeMessage();
+            message.From.Add(MailboxAddress.Parse(_fromAddr));
+            foreach (var addr in _toAddrs)
+                message.To.Add(MailboxAddress.Parse(addr));
+            message.Subject = isSummary ? "Daily Veeam VHC AWS Summary" : "Veeam VHC AWS Alert";
+
+            var bodyBuilder = new BodyBuilder { HtmlBody = html };
+            message.Body = bodyBuilder.ToMessageBody();
+
             using var client = new SmtpClient();
             client.Connect(_smtpHost, _smtpPort, _useTls ? MailKit.Security.SecureSocketOptions.StartTls : MailKit.Security.SecureSocketOptions.None);
             if (!string.IsNullOrEmpty(_smtpUsername))

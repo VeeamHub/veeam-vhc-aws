@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
+using VeeamVhcAws.Scheduling;
 using VeeamVhcAws.Web;
 using VeeamVhcAws.Web.Services;
 
@@ -15,7 +16,7 @@ sealed class UiHarness : IDisposable
     public StateService State { get; }
     public TestContext Context { get; }
 
-    public UiHarness(string? stateJson = null, bool writeConfig = true)
+    public UiHarness(string? stateJson = null, bool writeConfig = true, IDailySummaryTaskHost? tasks = null)
     {
         Dir = Path.Combine(Path.GetTempPath(), "vhc-ui-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Dir);
@@ -34,6 +35,7 @@ sealed class UiHarness : IDisposable
         Context.Services.AddSingleton(options);
         Context.Services.AddSingleton(Config);
         Context.Services.AddSingleton(State);
+        Context.Services.AddSingleton(tasks ?? new NoopDailySummaryTaskHost());
     }
 
     public void Dispose()

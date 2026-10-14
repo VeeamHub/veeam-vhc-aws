@@ -1,5 +1,6 @@
 @page "/outputs"
 @rendermode InteractiveServer
+@using VeeamVhcAws.Core.Output
 @inject ConfigService Config
 
 <PageTitle>Outputs — Veeam VHC AWS</PageTitle>
@@ -13,6 +14,11 @@
 </div>
 
 <p class="muted">Notification channels for monitor findings. Multiple handlers can be configured — all fire on every run.</p>
+
+@if (_cfg is not null && StdoutOnlyOutput.IsOnly(_cfg.Outputs.Select(o => o.Type)))
+{
+    <p class="notice" role="status">@StdoutOnlyOutput.Warning</p>
+}
 
 @if (_cfg is null)
 {
@@ -158,5 +164,5 @@ else
     private static string FormatRemaining(OutputView o) =>
         string.Join(", ", o.Fields
             .Where(kv => kv.Key != "min_severity" && kv.Key != "url" && kv.Key != "path" && kv.Key != "smtp_host" && kv.Key != "smtp_port" && kv.Value != null)
-            .Select(kv => $"{kv.Key}={kv.Value}"));
+            .Select(kv => $"{kv.Key}={OutputFieldText.Format(kv.Value)}"));
 }

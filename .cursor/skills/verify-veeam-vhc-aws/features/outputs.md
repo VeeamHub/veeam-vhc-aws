@@ -5,6 +5,7 @@ Outputs adds the notification handlers a monitor run will call. The page writes 
 ## Sub-features
 
 - `outputs-empty` shows the empty state.
+- `outputs-stdout-only` warns when every handler is `json_stdout`. A scheduled task discards stdout, so that run delivers nothing.
 - `outputs-add-json` saves a JSON file handler without sending anything over the network.
 - `outputs-add-webhook` saves a webhook URL and template.
 - `outputs-cancel` discards the dialog.
@@ -29,6 +30,9 @@ Preconditions:
 - **Webhook.** Add another handler, leave type `webhook`, set **URL** to `https://example.invalid/hook`, and set **Template** to `ntfy`. **Save** is rejected with `Webhook URL is required` when the URL is blank.
 - **Proof.** Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser screenshot --path "$EVIDENCE/outputs/list.png"` and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser snapshot --path "$EVIDENCE/outputs/list.aria.txt"`. Copy the yaml next to them and confirm the handler is in it.
 - **Delete.** Choose **Delete json_file 1** on the row, wait for `Delete output handler?`, then choose **Confirm delete**. The flash says `Output handler deleted`. Run `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Delete json_file 1"`, `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-heading "Delete output handler?"`, and `.cursor/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Confirm delete"`.
+
+- **Stdout-only warning.** A config whose only handler is `json_stdout` shows the notice `JSON stdout is the only output handler. A scheduled task discards stdout, so this run will not deliver findings. Add email, a webhook, or a JSON file.` Adding email, a webhook, or a JSON file removes the notice. An empty page does not show it, because there is no handler row yet.
+- **Email recipients.** `to_addrs` may be a string or a list. The To addresses box and the handler row show the addresses separated by commas, not a type name.
 
 ## Gotchas
 

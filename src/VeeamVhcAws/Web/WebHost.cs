@@ -7,6 +7,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using VeeamVhcAws.Scheduling;
 using VeeamVhcAws.Web.Components;
 using VeeamVhcAws.Web.Services;
 using SerilogILogger = Serilog.ILogger;
@@ -42,6 +43,7 @@ public static class WebHost
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(auth);
         builder.Services.AddScoped<StateService>();
+        builder.Services.AddSingleton(DailySummaryTasks.CreateDefault());
         builder.Services.AddScoped<ConfigService>();
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
