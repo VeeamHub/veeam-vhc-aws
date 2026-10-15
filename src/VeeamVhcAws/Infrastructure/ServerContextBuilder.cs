@@ -18,7 +18,7 @@ public static class ServerContextBuilder
         var password = PasswordObfuscator.Deobfuscate(serverCfg.Get("password", ""));
         var verifySsl = serverCfg.Get("verify_ssl", true);
         var timeout = globalCfg.Get("timeout_seconds", 30);
-        var sessionTimeout = globalCfg.Get("session_timeout_seconds", 120);
+        var sessionTimeout = globalCfg.Get("session_timeout_seconds", 600);
         var retryCount = globalCfg.Get("retry_count", 2);
         var retryDelay = globalCfg.Get("retry_delay_seconds", 5);
         var pageSize = globalCfg.Get("page_size", 500);

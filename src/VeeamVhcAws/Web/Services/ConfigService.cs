@@ -240,10 +240,7 @@ public class ConfigService
         return prior.Get("url", "");
     }
 
-    private static bool IsSecretKey(string key) =>
-        key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-        key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-        key.Contains("secret", StringComparison.OrdinalIgnoreCase);
+    private static bool IsSecretKey(string key) => ConfigSecrets.IsSecretKey(key);
 
     private void WriteYaml(Dictionary<string, object> config)
     {
@@ -261,10 +258,7 @@ public class ConfigService
         if (value is null) return null;
         var maskWebhook = outputType.Equals("webhook", StringComparison.OrdinalIgnoreCase) &&
             key.Equals("url", StringComparison.OrdinalIgnoreCase);
-        if (maskWebhook ||
-            key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("secret", StringComparison.OrdinalIgnoreCase))
+        if (maskWebhook || IsSecretKey(key))
             return string.IsNullOrEmpty(value as string) ? "" : "********";
         return value;
     }

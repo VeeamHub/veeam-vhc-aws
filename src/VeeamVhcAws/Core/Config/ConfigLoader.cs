@@ -302,6 +302,12 @@ public static class ConfigLoader
         return true;
     }
 
+    /// <summary>
+    /// Overlays <paramref name="overlay"/> on <paramref name="baseDict"/>. Nested maps merge key by
+    /// key, including the <c>Dictionary&lt;object, object&gt;</c> maps YamlDotNet produces, so a
+    /// partial <c>global:</c> block fills the gaps from the defaults instead of replacing them.
+    /// An empty block (YAML null) over a default map keeps the defaults.
+    /// </summary>
     public static Dictionary<string, object> DeepMerge(
         Dictionary<string, object> baseDict,
         Dictionary<string, object> overlay)
@@ -310,18 +316,27 @@ public static class ConfigLoader
         foreach (var (key, value) in overlay)
         {
             if (result.TryGetValue(key, out var existing)
-                && existing is Dictionary<string, object> existingDict
-                && value is Dictionary<string, object> overlayDict)
+                && existing is Dictionary<string, object> existingDict)
             {
-                result[key] = DeepMerge(existingDict, overlayDict);
+                if (value is null)
+                    continue;
+                if (AsStringKeyedMap(value) is { } overlayDict)
+                {
+                    result[key] = DeepMerge(existingDict, overlayDict);
+                    continue;
+                }
             }
-            else
-            {
-                result[key] = value;
-            }
+            result[key] = value!;
         }
         return result;
     }
+
+    private static Dictionary<string, object>? AsStringKeyedMap(object value) => value switch
+    {
+        Dictionary<string, object> typed => typed,
+        Dictionary<object, object> raw => raw.ToDictionary(kv => kv.Key?.ToString() ?? "", kv => kv.Value),
+        _ => null,
+    };
 
     private static void ApplyEnvServers(Dictionary<string, object> config)
     {

@@ -205,4 +205,60 @@ public class ConfigLoaderTests
         var result = dict.GetListOfStrings("items");
         Assert.Empty(result);
     }
+
+    [Fact]
+    public void DeepMergeRecursesIntoYamlDotNetMaps()
+    {
+        var baseDict = new Dictionary<string, object>
+        {
+            ["b"] = new Dictionary<string, object> { ["x"] = 10, ["y"] = 20 },
+        };
+        var overlay = new Dictionary<string, object>
+        {
+            ["b"] = new Dictionary<object, object> { ["y"] = 30 },
+        };
+
+        var b = ConfigLoader.DeepMerge(baseDict, overlay).GetSection("b");
+
+        Assert.Equal(10, b.Get("x", 0));
+        Assert.Equal(30, b.Get("y", 0));
+    }
+
+    [Fact]
+    public void LoadConfigPartialGlobalBlockKeepsDefaults()
+    {
+        var global = LoadGlobal("global:\n  timeout_seconds: 60\n  logging:\n    level: INFO\n");
+
+        Assert.Equal(60, global.Get("timeout_seconds", 0));
+        Assert.Equal(600, global.Get("session_timeout_seconds", 0));
+        Assert.Equal(2, global.Get("retry_count", 0));
+        var logging = global.GetSection("logging");
+        Assert.Equal("INFO", logging.Get("level", ""));
+        Assert.Equal(30, logging.Get("rotation_keep", 0));
+        Assert.Equal("./veeam-vhc-aws.log", logging.Get("file", ""));
+    }
+
+    [Fact]
+    public void LoadConfigEmptyGlobalBlockKeepsDefaults()
+    {
+        var global = LoadGlobal("global:\nservers: []\n");
+
+        Assert.Equal(600, global.Get("session_timeout_seconds", 0));
+        Assert.Equal(30, global.Get("timeout_seconds", 0));
+    }
+
+    private static Dictionary<string, object> LoadGlobal(string yaml)
+    {
+        var dir = Directory.CreateTempSubdirectory("vhc-merge-");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "veeam-vhc-aws.yaml");
+            File.WriteAllText(path, yaml);
+            return ConfigLoader.LoadConfig(path).GetSection("global");
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
 }

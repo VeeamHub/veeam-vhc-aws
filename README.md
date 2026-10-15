@@ -152,7 +152,8 @@ veeam-vhc-aws captures list -c config.yaml
 veeam-vhc-aws captures suppress <key> -c config.yaml
 veeam-vhc-aws captures unsuppress <key> -c config.yaml
 
-# Encrypt plaintext passwords, and rewrap legacy ENC: values, with the machine-local key
+# Encrypt plaintext secrets (any key whose name contains password, token or secret,
+# the same keys the web UI encrypts) and rewrap legacy ENC: values, with the machine-local key
 veeam-vhc-aws encrypt-config -c config.yaml
 
 # Print version
@@ -336,14 +337,14 @@ servers:
     username: DOMAIN\backupadmin
     password: "secret"
     api_version: "1.3-rev1"
-    verify_ssl: false
+    verify_ssl: true   # false only for a lab with a self-signed certificate
 
   - name: aws-backup
     type: vbaws
     url: https://vbaws-appliance
     username: admin
     password: "secret"
-    verify_ssl: false
+    verify_ssl: true
 ```
 
 > [!TIP]
@@ -481,6 +482,12 @@ Start-ScheduledTask -TaskName "Veeam VHC AWS"
 | Version | New config key | Default | Notes |
 |---------|---------------|---------|-------|
 | v1.0.0.44+ | `global.session_timeout_seconds` | `600` | Timeout for `/api/v1/sessions` calls. Configurable via the web UI Settings page or YAML. |
+
+#### Behavior changes (unreleased)
+
+- `encrypt-config` encrypts every key whose name contains `password`, `token` or `secret`, the same keys the web UI encrypts. Before, it only rewrote `password` and `smtp_password`. It now reads the value the way the app does: a single-quoted password is encrypted without its quotes (before, the quotes were encrypted with it, and the decrypted password was wrong), and a line with a trailing `# comment` is encrypted and keeps the comment (before, it was left in plaintext). Current `ENC:` values and all other keys are left byte-for-byte; legacy `ENC:` values are still rewrapped. Webhook URLs are not encrypted, because outputs read them as plain URLs.
+- `setup --template` and the README samples write `verify_ssl: true`, matching the web UI, the wizard, and `config/example.yaml`. Set `verify_ssl: false` only for a lab server with a self-signed certificate. `test-connection` suggests it when the certificate is rejected.
+- A partial `global:` block (for example only `timeout_seconds`, or `logging:` with only `level`) now keeps the defaults for every key it leaves out. Before, the partial block replaced the defaults, and monitors fell back to a 120-second `session_timeout_seconds` while the Settings page showed 600. The default is now 600 everywhere. An empty `global:` line also keeps the defaults.
 
 ---
 

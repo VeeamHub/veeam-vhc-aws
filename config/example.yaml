@@ -29,7 +29,7 @@ global:
 
 # Servers to monitor — add as many as needed
 # Each entry must have: name, type (vbr or vbaws), url
-# Servers >5 automatically run in parallel
+# 2 or fewer servers run one after another; 3+ servers run in parallel
 servers:
   - name: prod-vbr
     type: vbr

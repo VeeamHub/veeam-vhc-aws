@@ -190,48 +190,63 @@ public class PasswordObfuscatorTests
     }
 }
 
-public class EncryptConfigCommandRegexTests
+public class ConfigSecretsTests
 {
+    [Theory]
+    [InlineData("password")]
+    [InlineData("smtp_password")]
+    [InlineData("some_password_field")]
+    [InlineData("api_token")]
+    [InlineData("client_secret")]
+    [InlineData("Password")]
+    public void IsSecretKey_MatchesTheKeysTheUiEncrypts(string key) =>
+        Assert.True(ConfigSecrets.IsSecretKey(key));
+
+    [Theory]
+    [InlineData("username")]
+    [InlineData("smtp_username")]
+    [InlineData("url")]
+    [InlineData("smtp_host")]
+    [InlineData("verify_ssl")]
+    public void IsSecretKey_IgnoresOrdinaryKeys(string key) =>
+        Assert.False(ConfigSecrets.IsSecretKey(key));
+
     [Theory]
     [InlineData("  password: mysecret")]
     [InlineData("  password: \"mysecret\"")]
     [InlineData("password: mysecret")]
-    public void Regex_MatchesPasswordLine(string line)
+    [InlineData("  smtp_password: mysecret")]
+    [InlineData("  - password: mysecret")]
+    public void ProtectLines_EncryptsPlaintextSecret(string line)
     {
-        var match = EncryptConfigCommand.PasswordLineRegex.Match(line);
-        Assert.True(match.Success, $"Expected match for: {line}");
-        Assert.Equal("mysecret", match.Groups[2].Value.Trim());
-    }
-
-    [Theory]
-    [InlineData("  smtp_password: smtpsecret")]
-    [InlineData("  smtp_password: \"smtpsecret\"")]
-    [InlineData("smtp_password: smtpsecret")]
-    public void Regex_MatchesSmtpPasswordLine(string line)
-    {
-        var match = EncryptConfigCommand.PasswordLineRegex.Match(line);
-        Assert.True(match.Success, $"Expected match for: {line}");
-        Assert.Equal("smtpsecret", match.Groups[2].Value.Trim());
-    }
-
-    [Theory]
-    [InlineData("  password: \"ENC:abc123\"")]
-    [InlineData("  password: ENC:abc123")]
-    [InlineData("  smtp_password: \"ENC:xyz789\"")]
-    [InlineData("  smtp_password: ENC:xyz789")]
-    public void Regex_SkipsAlreadyObfuscatedValues(string line)
-    {
-        var match = EncryptConfigCommand.PasswordLineRegex.Match(line);
-        Assert.False(match.Success, $"Expected no match for already-obfuscated: {line}");
+        var lines = new[] { line };
+        Assert.Equal(1, ConfigSecrets.ProtectLines(lines));
+        var stored = lines[0].Split('"')[1];
+        Assert.StartsWith("ENC:", stored);
+        Assert.Equal("mysecret", PasswordObfuscator.Deobfuscate(stored));
     }
 
     [Theory]
     [InlineData("  username: someone")]
-    [InlineData("  some_password_field: value")]
-    [InlineData("  notapassword: value")]
-    public void Regex_DoesNotMatchUnrelatedKeys(string line)
+    [InlineData("  url: https://hooks.example/abc")]
+    [InlineData("  password: \"\"")]
+    [InlineData("  password:")]
+    [InlineData("  password: |")]
+    [InlineData("  # password: commented-out")]
+    public void ProtectLines_LeavesLineAlone(string line)
     {
-        var match = EncryptConfigCommand.PasswordLineRegex.Match(line);
-        Assert.False(match.Success, $"Expected no match for unrelated key: {line}");
+        var lines = new[] { line };
+        Assert.Equal(0, ConfigSecrets.ProtectLines(lines));
+        Assert.Equal(line, lines[0]);
+    }
+
+    [Fact]
+    public void ProtectLines_SkipsCurrentEncValues()
+    {
+        var current = PasswordObfuscator.Obfuscate("x");
+        var lines = new[] { $"  password: \"{current}\"", $"  api_token: {current}" };
+        var before = lines.ToArray();
+        Assert.Equal(0, ConfigSecrets.ProtectLines(lines));
+        Assert.Equal(before, lines);
     }
 }
