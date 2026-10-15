@@ -537,21 +537,11 @@ public class WebhookHandler : IOutputHandler
             };
         }
 
-        // For ntfy with dedup: skip if no new alertable findings
-        if (!isSummary && _template == "ntfy" && _deduplicate)
+        // Dedup applies to every template: skip when nothing is new and nothing resolved.
+        if (!isSummary && _deduplicate && !results.HasNewOrResolvedFindings())
         {
-            var hasNewAlerts = results.SelectMany(r => r.Findings).Any(f =>
-                f.Severity != Severity.Ok
-                && f.MetricName == null
-                && !(f.Details.ContainsKey("_seen_before") && f.Details["_seen_before"] is true)
-                && !f.Message.StartsWith("RESOLVED:"));
-            var hasResolved = results.SelectMany(r => r.Findings).Any(f => f.Message.StartsWith("RESOLVED:"));
-
-            if (!hasNewAlerts && !hasResolved)
-            {
-                Record($"Webhook skipped for {HostForLog(_url)} — no new or resolved findings (dedup)");
-                return;
-            }
+            Record($"Webhook skipped for {HostForLog(_url)} — no new or resolved findings (dedup)");
+            return;
         }
 
         var decision = OutboundUrlDecision.Decide(_url, _allowLoopback);

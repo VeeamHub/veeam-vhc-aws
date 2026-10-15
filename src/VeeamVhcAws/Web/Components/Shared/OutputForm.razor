@@ -36,6 +36,7 @@
                 _fields.TryAdd("smtp_username", "");
                 _fields.TryAdd("smtp_password", "");
                 _fields.TryAdd("use_tls", true);
+                _fields.TryAdd("deduplicate", true);
                 break;
             case "prometheus":
                 _fields.TryAdd("mode", "pushgateway");
@@ -183,6 +184,9 @@
             </div>
             <div class="form-row">
                 <label><input type="checkbox" checked="@GetBool("use_tls")" @onchange="@(e => SetBool("use_tls", e))" /> Use TLS (StartTLS on port 587)</label>
+            </div>
+            <div class="form-row">
+                <label><input type="checkbox" checked="@GetBool("deduplicate")" @onchange="@(e => SetBool("deduplicate", e))" /> Deduplicate (only alert on changes)</label>
             </div>
         }
         else if (_type == "prometheus")

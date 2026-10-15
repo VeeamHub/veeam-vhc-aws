@@ -81,6 +81,8 @@ public static class CommandHelpers
             if (code > worst) worst = code;
             foreach (var finding in result.Findings)
             {
+                if (FindingState.IsSuppressed(finding))
+                    continue;
                 code = finding.Severity.ToExitCode();
                 if (code > worst) worst = code;
             }

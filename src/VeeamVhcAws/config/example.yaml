@@ -104,6 +104,7 @@ output:
   #   smtp_username: alerts@example.com
   #   smtp_password: ""   # run 'veeam-vhc-aws encrypt-config' to obfuscate
   #   use_tls: true
+  #   deduplicate: true   # false = email every run, even for findings already alerted
 
 repo_health:
   enabled: true

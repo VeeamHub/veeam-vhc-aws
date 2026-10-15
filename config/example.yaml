@@ -105,6 +105,7 @@ output:
   #   from_addr: veeam-vhc-aws@example.com
   #   to_addrs: ["ops@example.com"]
   #   min_severity: warning
+  #   deduplicate: true   # false = email every run, even for findings already alerted
 
 repo_health:
   enabled: true

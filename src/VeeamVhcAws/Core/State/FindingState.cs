@@ -185,6 +185,7 @@ public class FindingState
         var now = DateTime.UtcNow.ToString("O");
         var currentKeys = new HashSet<string>();
         var newFindingsByResult = new Dictionary<int, List<Finding>>();
+        var hasSuppressed = new bool[results.Count];
         var resolved = new List<Finding>();
         var findings = GetFindings();
         var capturedErrors = GetCapturedErrors();
@@ -243,6 +244,7 @@ public class FindingState
                         ["_suppressed"] = true
                     };
                     Logger.Debug("Suppressed finding: {Resource} — {Message}", finding.Resource, finding.Message);
+                    hasSuppressed[i] = true;
                     continue;
                 }
 
@@ -331,6 +333,10 @@ public class FindingState
         for (int i = 0; i < results.Count; i++)
         {
             var r = results[i];
+            // A suppressed finding no longer drives severity. Recompute it on the caller's result
+            // too, so outputs and the exit code agree with what is left after suppression.
+            if (hasSuppressed[i])
+                r.OverallSeverity = SeverityAfterSuppression(r);
             filteredResults.Add(new MonitorResult(
                 monitor: r.Monitor,
                 timestamp: r.Timestamp,
@@ -347,5 +353,22 @@ public class FindingState
         Save();
 
         return (filteredResults, resolved);
+    }
+
+    internal static bool IsSuppressed(Finding finding) =>
+        finding.Details.TryGetValue("_suppressed", out var flag) && flag is true;
+
+    // Worst severity among the findings that were not suppressed. Monitor errors are not
+    // findings and cannot be suppressed, so a result that reported errors stays at least Warning,
+    // the same floor MonitorRunner applies.
+    private static Severity SeverityAfterSuppression(MonitorResult result)
+    {
+        var worst = result.Errors.Count > 0 ? Severity.Warning : Severity.Ok;
+        foreach (var f in result.Findings)
+        {
+            if (!IsSuppressed(f) && f.Severity.Rank() > worst.Rank())
+                worst = f.Severity;
+        }
+        return worst;
     }
 }

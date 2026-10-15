@@ -28,11 +28,13 @@ public class EmailHandler : IOutputHandler
     private readonly string _smtpUsername;
     private readonly string _smtpPassword;
     private readonly bool _useTls;
+    private readonly bool _deduplicate;
 
     public EmailHandler(string smtpHost, int smtpPort = 587,
         string fromAddr = "", List<string>? toAddrs = null,
         string minSeverity = "critical",
-        string smtpUsername = "", string smtpPassword = "", bool useTls = true)
+        string smtpUsername = "", string smtpPassword = "", bool useTls = true,
+        bool deduplicate = true)
     {
         _smtpHost = smtpHost;
         _smtpPort = smtpPort;
@@ -42,6 +44,7 @@ public class EmailHandler : IOutputHandler
         _smtpUsername = smtpUsername;
         _smtpPassword = smtpPassword;
         _useTls = useTls;
+        _deduplicate = deduplicate;
     }
 
     private bool ShouldSend(IReadOnlyList<MonitorResult> results)
@@ -131,7 +134,8 @@ public class EmailHandler : IOutputHandler
     /// Decides whether an email should be sent for these results.
     /// A daily summary (Metadata["summary"] == true) always sends — even when everything is
     /// healthy — because an "all clear" report is the point of a daily summary. Alert (non-summary)
-    /// runs are gated by both the minimum-severity threshold and the presence of findings/errors.
+    /// runs are gated by the minimum-severity threshold, the presence of findings/errors, and (unless
+    /// deduplicate is false) by having a new or resolved finding.
     /// </summary>
     public bool ShouldEmit(IReadOnlyList<MonitorResult> results, out string? skipReason)
     {
@@ -150,6 +154,12 @@ public class EmailHandler : IOutputHandler
         if (!isSummary && !hasContent)
         {
             skipReason = "no findings or errors to report";
+            return false;
+        }
+
+        if (!isSummary && _deduplicate && !results.HasNewOrResolvedFindings())
+        {
+            skipReason = "no new or resolved findings (dedup)";
             return false;
         }
 

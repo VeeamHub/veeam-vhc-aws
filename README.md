@@ -242,7 +242,7 @@ veeam-vhc-aws tracks finding state between runs so you only get notified when so
 
 State is stored in `veeam-vhc-aws-state.json`. A relative `global.state_file` is resolved from the directory that contains the config file, not from the process working directory. Log files, the state file, and JSON file output paths must stay inside that directory. The program rejects `..` and a symlink that points outside it. If the configured log file cannot be created, logging falls back to the local application data directory. Deleting the state file resets all state. Every existing finding alerts again on the next run.
 
-Deduplication is **on by default** for all output handlers. To disable it for a specific handler (e.g., to always send every alert regardless of state), add `deduplicate: false`:
+Deduplication is **on by default** for the alert outputs: `webhook` (every template: generic, slack, teams, pagerduty, ntfy) and `email`. A run where every active finding was already alerted, and nothing resolved, sends nothing. When a run does send, generic, slack, teams, pagerduty, and email include all active findings, while ntfy lists only the new ones. `json_file`, `json_stdout`, and `prometheus` record the full current state on every run and do not deduplicate. To disable it for a specific handler (e.g., to always send every alert regardless of state), add `deduplicate: false`:
 
 ```yaml
 output:
@@ -287,7 +287,7 @@ The daily summary uses your configured output handlers (same as alerts) but bypa
 | 2 | CRITICAL |
 | 3 | ERROR |
 
-The worst severity across all findings determines the exit code, making it CI/CD-friendly.
+The worst severity across all findings determines the exit code, making it CI/CD-friendly. A suppressed finding (`captures suppress`, the Alerts page, or `suppressions` in the config) does not count toward the exit code or the monitor's overall severity. A monitor that reported errors stays at least WARNING, because errors cannot be suppressed.
 
 ### Configuration
 

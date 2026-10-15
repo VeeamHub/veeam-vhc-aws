@@ -32,6 +32,7 @@ Preconditions:
 - **Delete.** Choose **Delete json_file 1** on the row, wait for `Delete output handler?`, then choose **Confirm delete**. The flash says `Output handler deleted`. Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Delete json_file 1"`, `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-heading "Delete output handler?"`, and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Confirm delete"`.
 
 - **Stdout-only warning.** A config whose only handler is `json_stdout` shows the notice `JSON stdout is the only output handler. A scheduled task discards stdout, so this run will not deliver findings. Add email, a webhook, or a JSON file.` Adding email, a webhook, or a JSON file removes the notice. An empty page does not show it, because there is no handler row yet.
+- **Email deduplicate.** A new email handler shows **Deduplicate (only alert on changes)** checked, and the yaml gets `deduplicate: true`. Choose **Edit email 1**, click the checkbox (`browser click --role checkbox --name "Deduplicate (only alert on changes)"`), and **Save**. The yaml then has `deduplicate: false`, the row shows `deduplicate=false`, and the box stays unchecked after a reload. Webhook has the same checkbox.
 - **Email recipients.** `to_addrs` may be a string or a list. The To addresses box and the handler row show the addresses separated by commas, not a type name.
 
 ## Gotchas

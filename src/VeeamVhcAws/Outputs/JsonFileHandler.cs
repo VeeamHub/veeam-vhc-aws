@@ -1,6 +1,7 @@
 using System.Text.Json;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Core.Output;
+using VeeamVhcAws.Core.State;
 
 namespace VeeamVhcAws.Outputs;
 
@@ -51,11 +52,9 @@ public class JsonFileHandler : IOutputHandler
 
         var output = results.Select(r => r.ToDictionary()).ToList();
 
-        var parent = Path.GetDirectoryName(_path);
-        if (!string.IsNullOrEmpty(parent))
-            Directory.CreateDirectory(parent);
-
+        // WriteAtomic creates the directory and replaces the file in one rename, so a crash
+        // mid-write never leaves a truncated JSON document behind.
         var json = JsonSerializer.Serialize(output, Options);
-        File.WriteAllText(_path, json + "\n");
+        StateFile.WriteAtomic(_path, json + "\n");
     }
 }

@@ -41,11 +41,12 @@ public static class AllCommand
                             .Select(name => (s.Name, name)))
                         .ToList();
 
-                    var (view, callback) = LiveMonitorView.Start(plannedWork);
+                    var (view, _) = LiveMonitorView.Start(plannedWork);
                     using (view)
                     {
-                        var progressReporter = new Progress<MonitorProgressEvent>(callback);
-                        results = MonitorRunner.RunAllServers(servers, cfg, pe, findingState: state, progress: progressReporter);
+                        // Report through the view directly. Progress<T> would post each report to
+                        // the thread pool, where a late "Running" can land after "Done".
+                        results = MonitorRunner.RunAllServers(servers, cfg, pe, findingState: state, progress: view);
                     }
                 }
                 else

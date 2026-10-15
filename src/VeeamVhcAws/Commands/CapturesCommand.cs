@@ -127,8 +127,13 @@ public static class CapturesCommand
         var (statePath, state) = LoadStateWithPath(config);
         if (state == null) return;
 
+        // Search active findings too: a key can exist there without a captured_errors entry
+        // (for example in a state file written before captured_errors existed). The web
+        // Alerts page already accepts both.
         var capturedErrors = GetStateSection(state, "captured_errors");
-        var matches = capturedErrors.Keys.Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
+        var findings = GetStateSection(state, "findings");
+        var matches = capturedErrors.Keys.Union(findings.Keys)
+            .Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (matches.Count == 0)
         {
@@ -142,8 +147,8 @@ public static class CapturesCommand
             AnsiConsole.MarkupLine($"[red]Ambiguous key prefix '{Markup.Escape(keyPrefix)}' — matches {matches.Count} entries:[/]");
             foreach (var m in matches)
             {
-                var entry = capturedErrors[m] as Dictionary<string, object>;
-                var text = entry?.GetValueOrDefault("text", "")?.ToString() ?? "";
+                var entry = (capturedErrors.GetValueOrDefault(m) ?? findings.GetValueOrDefault(m)) as Dictionary<string, object>;
+                var text = (entry?.GetValueOrDefault("text") ?? entry?.GetValueOrDefault("message"))?.ToString() ?? "";
                 AnsiConsole.MarkupLine($"  {m[..8]}  {Markup.Escape(text)}");
             }
             Environment.ExitCode = 1;

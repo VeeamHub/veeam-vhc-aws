@@ -31,7 +31,8 @@ public static class OutputHandlerFactory
             cfg.Get("min_severity", "critical"),
             cfg.Get("smtp_username", ""),
             PasswordObfuscator.Deobfuscate(cfg.Get("smtp_password", "")),
-            cfg.Get("use_tls", true)),
+            cfg.Get("use_tls", true),
+            cfg.Get("deduplicate", true)),
     };
 
     private static List<string> ParseToAddrs(Dictionary<string, object> cfg)
