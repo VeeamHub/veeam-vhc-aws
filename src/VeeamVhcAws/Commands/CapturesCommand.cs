@@ -39,6 +39,7 @@ public static class CapturesCommand
             if (state == null) return;
 
             var capturedErrors = GetStateSection(state, "captured_errors");
+            var suppressions = GetStateSection(state, "suppressions");
             if (capturedErrors.Count == 0)
             {
                 AnsiConsole.MarkupLine("[yellow]No captured errors.[/]");
@@ -49,11 +50,12 @@ public static class CapturesCommand
             var entries = capturedErrors
                 .Select(kv => (Key: kv.Key, Entry: kv.Value as Dictionary<string, object>))
                 .Where(x => x.Entry != null)
+                .Select(x => (x.Key, x.Entry, Suppressed: Suppression.IsSuppressed(x.Key, x.Entry, suppressions)))
                 .OrderByDescending(x => x.Entry!.GetValueOrDefault("last_seen", "")?.ToString() ?? "")
                 .ToList();
 
             if (!showAll)
-                entries = entries.Where(x => x.Entry!.GetValueOrDefault("suppressed") is not true).ToList();
+                entries = entries.Where(x => !x.Suppressed).ToList();
 
             if (entries.Count == 0)
             {
@@ -70,7 +72,7 @@ public static class CapturesCommand
             table.AddColumn("Count");
             table.AddColumn("Suppressed");
 
-            foreach (var (key, entry) in entries)
+            foreach (var (key, entry, suppressed) in entries)
             {
                 var e = entry!;
                 var keyShort = key.Length > 8 ? key[..8] : key;
@@ -78,7 +80,6 @@ public static class CapturesCommand
                 var resource = e.GetValueOrDefault("resource", "")?.ToString() ?? "";
                 var text = e.GetValueOrDefault("text", "")?.ToString() ?? "";
                 var count = e.GetValueOrDefault("count", 0);
-                var suppressed = e.GetValueOrDefault("suppressed") is true;
 
                 if (resource.Length > 40) resource = resource[..40];
                 if (text.Length > 60) text = text[..60];
@@ -162,6 +163,8 @@ public static class CapturesCommand
             ["suppressed_at"] = DateTime.UtcNow.ToString("O")
         };
         state["suppressions"] = suppressions;
+        if (Suppression.MarkCaptured(capturedErrors, matchedKey, suppressed: true))
+            state["captured_errors"] = capturedErrors;
 
         SaveState(statePath!, state);
         AnsiConsole.MarkupLine($"[green]Suppressed:[/] {matchedKey[..8]}");
@@ -192,8 +195,13 @@ public static class CapturesCommand
         var (statePath, state) = LoadStateWithPath(config);
         if (state == null) return;
 
+        // Same rule as list and the web UI: an entry is suppressed when it is in the
+        // suppressions map or its captured_errors flag is set, so either one can match.
         var suppressions = GetStateSection(state, "suppressions");
-        var matches = suppressions.Keys.Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
+        var capturedErrors = GetStateSection(state, "captured_errors");
+        var matches = suppressions.Keys
+            .Union(capturedErrors.Where(kv => Suppression.IsSuppressed(kv.Key, kv.Value as Dictionary<string, object>, suppressions)).Select(kv => kv.Key))
+            .Where(k => k.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (matches.Count == 0)
         {
@@ -214,6 +222,8 @@ public static class CapturesCommand
         var matchedKey = matches[0];
         suppressions.Remove(matchedKey);
         state["suppressions"] = suppressions;
+        if (Suppression.MarkCaptured(capturedErrors, matchedKey, suppressed: false))
+            state["captured_errors"] = capturedErrors;
 
         SaveState(statePath!, state);
         AnsiConsole.MarkupLine($"[green]Unsuppressed:[/] {matchedKey[..8]}");

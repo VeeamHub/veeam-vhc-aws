@@ -67,7 +67,7 @@ public class StateService
             ["suppressed_at"] = DateTime.UtcNow.ToString("o"),
         };
         root["suppressions"] = suppressions;
-        if (MarkCaptured(captured, key, suppressed: true))
+        if (Suppression.MarkCaptured(captured, key, suppressed: true))
             root["captured_errors"] = captured;
         Save(root);
         return true;
@@ -88,23 +88,13 @@ public class StateService
         var suppressions = AsDict(root.GetValueOrDefault("suppressions"));
         var removed = suppressions.Remove(key);
         var captured = AsDict(root.GetValueOrDefault("captured_errors"));
-        var cleared = MarkCaptured(captured, key, suppressed: false);
+        var cleared = Suppression.MarkCaptured(captured, key, suppressed: false);
         if (!removed && !cleared) return false;
 
         root["suppressions"] = suppressions;
         if (cleared)
             root["captured_errors"] = captured;
         Save(root);
-        return true;
-    }
-
-    private static bool MarkCaptured(Dictionary<string, object> captured, string key, bool suppressed)
-    {
-        if (captured.GetValueOrDefault(key) is not Dictionary<string, object> entry)
-            return false;
-        if (entry.GetValueOrDefault("suppressed") is bool current && current == suppressed)
-            return false;
-        entry["suppressed"] = suppressed;
         return true;
     }
 
@@ -172,8 +162,7 @@ public class StateService
                 int i => (double)i,
                 _ => 1.0,
             };
-            var suppressedFlag = entry.GetValueOrDefault("suppressed") is true;
-            var suppressed = suppressedFlag || suppressions.ContainsKey(key);
+            var suppressed = Suppression.IsSuppressed(key, entry, suppressions);
 
             results.Add(new AlertView(key, sev, server, monitor, resource, message, firstSeen, lastSeen, count, suppressed));
         }

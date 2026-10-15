@@ -104,7 +104,7 @@ public class CommandWiringTests : IDisposable
         Assert.Contains("password: \"ENC:", File.ReadAllText(path));
     }
 
-    [Fact(Skip = "Found: encrypt-config only declares --config. Every other command (and the README) accepts -c, so `encrypt-config -c <file>` fails to parse. Product fix is out of scope for this test PR.")]
+    [Fact]
     public void EncryptConfig_AcceptsTheShortConfigAlias()
     {
         var path = WriteServerConfig("plain-pw");
@@ -187,7 +187,7 @@ public class CommandWiringTests : IDisposable
         Assert.Equal(1, Environment.ExitCode);
     }
 
-    [Fact(Skip = "Found: `captures list` hides an entry only when captured_errors[key].suppressed is true. `captures suppress` writes the top-level suppressions map, which the web UI and FindingState honour, so the CLI list keeps showing the entry until the next monitor run copies the flag over.")]
+    [Fact]
     public void CapturesList_HidesAnEntryRightAfterCapturesSuppress()
     {
         var config = WriteCapturesState();
@@ -199,6 +199,49 @@ public class CommandWiringTests : IDisposable
         var text = _ansiOut.ToString();
         Assert.DoesNotContain(CapturedKey[..8], text);
         Assert.Contains(OtherKey[..8], text);
+    }
+
+    [Fact]
+    public void CapturesList_All_LabelsAnEntrySuppressedOnlyInTheSuppressionsMap()
+    {
+        var config = WriteCapturesState();
+        Quiet(() => CapturesCommand.Create().Invoke(new[] { "suppress", CapturedKey[..8], "-c", config }));
+        _ansiOut.GetStringBuilder().Clear();
+
+        Quiet(() => CapturesCommand.Create().Invoke(new[] { "list", "--all", "-c", config }));
+
+        Assert.Contains("yes", RowFor(CapturedKey));
+        Assert.DoesNotContain("yes", RowFor(OtherKey));
+    }
+
+    [Fact]
+    public void CapturesUnsuppress_ShowsTheEntryAgainAfterAMonitorRunCopiedTheFlag()
+    {
+        // A monitor run copies the suppression onto captured_errors[key].suppressed, so the
+        // state holds both. Unsuppress has to clear both, as the web UI does.
+        var config = WriteCapturesState(flagFirstSuppressed: true, mapFirstSuppressed: true);
+
+        Quiet(() => CapturesCommand.Create().Invoke(new[] { "unsuppress", CapturedKey[..8], "-c", config }));
+        Assert.Equal(0, Environment.ExitCode);
+        _ansiOut.GetStringBuilder().Clear();
+
+        Quiet(() => CapturesCommand.Create().Invoke(new[] { "list", "-c", config }));
+
+        Assert.Contains(CapturedKey[..8], _ansiOut.ToString());
+    }
+
+    [Fact]
+    public void CapturesUnsuppress_ClearsAnEntryFlaggedSuppressedWithNoMapEntry()
+    {
+        var config = WriteCapturesState(flagFirstSuppressed: true);
+
+        Quiet(() => CapturesCommand.Create().Invoke(new[] { "unsuppress", CapturedKey[..8], "-c", config }));
+        Assert.Equal(0, Environment.ExitCode);
+        _ansiOut.GetStringBuilder().Clear();
+
+        Quiet(() => CapturesCommand.Create().Invoke(new[] { "list", "-c", config }));
+
+        Assert.Contains(CapturedKey[..8], _ansiOut.ToString());
     }
 
     [Fact]
@@ -232,11 +275,14 @@ public class CommandWiringTests : IDisposable
 
     private string StatePath => Path.Combine(_dir, "veeam-vhc-aws-state.json");
 
-    private string WriteCapturesState(bool flagFirstSuppressed = false)
+    private string WriteCapturesState(bool flagFirstSuppressed = false, bool mapFirstSuppressed = false)
     {
         var config = Path.Combine(_dir, "veeam-vhc-aws.yaml");
         File.WriteAllText(config, "servers: []\n");
         var flag = flagFirstSuppressed ? "true" : "false";
+        var suppressions = mapFirstSuppressed
+            ? $$"""{ "{{CapturedKey}}": { "suppressed_at": "2026-10-15T10:05:00Z" } }"""
+            : "{}";
         File.WriteAllText(StatePath, $$"""
             {
               "findings": {},
@@ -244,11 +290,14 @@ public class CommandWiringTests : IDisposable
                 "{{CapturedKey}}": { "resource": "[s1] repo:a", "text": "Repository is low on space", "severity": "warning", "count": 2, "last_seen": "2026-10-15T10:00:00Z", "suppressed": {{flag}} },
                 "{{OtherKey}}": { "resource": "[s1] repo:b", "text": "Repository unreachable", "severity": "critical", "count": 1, "last_seen": "2026-10-15T09:00:00Z", "suppressed": false }
               },
-              "suppressions": {}
+              "suppressions": {{suppressions}}
             }
             """);
         return config;
     }
+
+    private string RowFor(string key) =>
+        _ansiOut.ToString().Split('\n').Single(line => line.Contains(key[..8]));
 
     private JsonElement Suppressions()
     {

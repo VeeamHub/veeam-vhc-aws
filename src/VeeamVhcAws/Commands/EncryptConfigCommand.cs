@@ -8,7 +8,7 @@ public static class EncryptConfigCommand
     public static Command Create()
     {
         var command = new Command("encrypt-config", "Protect plaintext and legacy ENC passwords in a config file");
-        var configOption = new Option<string?>("--config", "Path to config file (default: same as other commands)");
+        var configOption = CommandHelpers.ConfigOption();
         command.AddOption(configOption);
 
         command.SetHandler((string? configArg) =>
