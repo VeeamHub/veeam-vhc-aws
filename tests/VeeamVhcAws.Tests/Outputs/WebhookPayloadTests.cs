@@ -121,10 +121,7 @@ public class WebhookPayloadTests
 
     private static async Task<Sent> Capture(string template, List<MonitorResult> results, bool deduplicate = true)
     {
-        var port = FreePort();
-        using var listener = new HttpListener();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        listener.Start();
+        using var listener = LoopbackHttpListener.Start(out var port);
         var serve = Task.Run(() =>
         {
             var ctx = listener.GetContext();
@@ -172,14 +169,5 @@ public class WebhookPayloadTests
         var goldenPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Webhook", $"{name}.golden");
         Assert.True(File.Exists(goldenPath), $"missing golden {goldenPath}");
         Assert.Equal(File.ReadAllText(goldenPath), actual);
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

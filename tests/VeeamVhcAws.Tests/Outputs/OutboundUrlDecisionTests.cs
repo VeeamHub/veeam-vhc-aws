@@ -51,11 +51,8 @@ public class OutboundUrlDecisionTests
     [Fact]
     public async Task Webhook_DoesNotCallLoopbackUnlessAllowed()
     {
-        var port = FreePort();
         var hits = 0;
-        using var listener = new HttpListener();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        listener.Start();
+        using var listener = LoopbackHttpListener.Start(out var port);
         var serve = Task.Run(() =>
         {
             while (listener.IsListening)
@@ -95,11 +92,8 @@ public class OutboundUrlDecisionTests
     [Fact]
     public async Task Webhook_DoesNotFollowARedirect()
     {
-        var port = FreePort();
         var hits = 0;
-        using var listener = new HttpListener();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        listener.Start();
+        using var listener = LoopbackHttpListener.Start(out var port);
         var serve = Task.Run(() =>
         {
             var ctx = listener.GetContext();
@@ -136,15 +130,6 @@ public class OutboundUrlDecisionTests
         Assert.Equal(
             "Pushgateway rejected for 169.254.169.254: metadata",
             string.Join("\n", handler.Logs));
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 
     private static List<MonitorResult> Sample() =>
