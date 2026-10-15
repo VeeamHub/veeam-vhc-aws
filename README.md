@@ -29,21 +29,22 @@
 ## ⚡ Quickstart (60 seconds)
 
 ```powershell
-# 1. Download the latest release zip, extract it, then in PowerShell as Admin:
+# 1. Download the latest release zip, extract it, then in PowerShell 7+ (pwsh) as Admin:
 .\setup.ps1
 
-# 2. Launch the web admin GUI to add servers and view alerts:
-veeam-vhc-aws ui
+# 2. Launch the web admin GUI to add servers and view alerts (setup.ps1 does not add the exe to PATH):
+cd "$env:ProgramFiles\VHC"
+.\veeam-vhc-aws.exe ui -c .\veeam-vhc-aws.yaml
 
 #    Your browser opens to http://127.0.0.1:9101
 #    -> click "+ Add Server" to onboard your first VBR or VBAWS server
 #    -> the Dashboard shows live status; the Alerts page lets you suppress with one click
 
-# 3. The scheduled task runs every 5 minutes in the background.
-#    Open the UI any time at:  veeam-vhc-aws ui
+# 3. The scheduled task runs every 5 minutes in the background (-IntervalMinutes changes it).
+#    Open the UI any time with the command from step 2.
 ```
 
-**Already installed?** Just run `veeam-vhc-aws ui` and open <http://127.0.0.1:9101>.
+**Already installed?** Run `.\veeam-vhc-aws.exe ui -c .\veeam-vhc-aws.yaml` from the install directory and open <http://127.0.0.1:9101>. Without `-c` (or `VEEAM_VHC_AWS_CONFIG`), every command looks for `veeam-vhc-aws.yaml` in the current directory.
 
 **Prefer YAML?** Run `veeam-vhc-aws setup` for the interactive terminal wizard, or edit `C:\Program Files\VHC\veeam-vhc-aws.yaml` directly.
 
@@ -68,7 +69,7 @@ veeam-vhc-aws all -c config.yaml --no-interactive
 - **Flexible Output** -- JSON, webhooks (Slack/Teams/PagerDuty/ntfy), Prometheus metrics, email
 - **Web Admin GUI** -- `veeam-vhc-aws ui` launches a browser-based admin dashboard. View live alerts, suppress with one click, add/edit/delete servers, configure output handlers, and tune thresholds — all without touching YAML
 - **Interactive Terminal UX** -- Setup wizard, live monitor progress, severity-coded results table, and actionable connection diagnostics — all auto-disabled for scheduled tasks and scripting
-- **Logging** -- Verbose logging with time-based rotation, disk space alerts, and credential redaction
+- **Logging** -- Verbose logging with daily rotation and disk space alerts. Webhook and Pushgateway log lines name the host, not the full URL
 
 ## 📗 Documentation
 
@@ -78,7 +79,7 @@ veeam-vhc-aws all -c config.yaml --no-interactive
 
 1. Download the **zip bundle** from the [latest release](https://github.com/VeeamHub/veeam-vhc-aws/releases/latest)
 2. Extract to a folder (e.g., your Desktop or `C:\VHC`)
-3. Right-click `setup.ps1` > **Run as Administrator** (required to install to Program Files and create a scheduled task)
+3. Open PowerShell 7+ (`pwsh`) **as Administrator** in the extracted folder and run `.\setup.ps1` (Administrator is required to install to Program Files and create a scheduled task; Windows PowerShell 5.1 is refused)
 4. The setup wizard will walk you through:
    - Configuring your VBR and/or VBAWS servers
    - Choosing how you want to be notified (ntfy, Slack, Teams, PagerDuty, email, or multiple)
@@ -105,14 +106,15 @@ dotnet run --project src/VeeamVhcAws -- all -c veeam-vhc-aws.yaml   # Run all mo
 
 ```bash
 docker build -t veeam-vhc-aws .
-docker run -v /path/to/config.yaml:/config/veeam-vhc-aws.yaml \
-  -e VEEAM_VHC_AWS_CONFIG=/config/veeam-vhc-aws.yaml \
-  veeam-vhc-aws
+# /path/to/vhc holds veeam-vhc-aws.yaml; the key file, state file and logs are written next to it
+docker run --rm -v /path/to/vhc:/config veeam-vhc-aws
 ```
 
-The image command is `all --config /config/veeam-vhc-aws.yaml`. Mount the config at that path. The `VEEAM_VHC_AWS_CONFIG` variable does not override a `--config` argument.
+The image command is `all --config /config/veeam-vhc-aws.yaml`, so the container runs every monitor once and exits with the [exit code](#exit-codes). Run it from cron, a Kubernetes CronJob, or another scheduler. The `VEEAM_VHC_AWS_CONFIG` variable does not override that `--config` argument; to use another path, pass a command, for example `docker run ... veeam-vhc-aws all -c /config/other.yaml`. For a long-running Prometheus exporter, run `serve -c /config/veeam-vhc-aws.yaml --bind 0.0.0.0` and publish the port, because `serve` listens on 127.0.0.1 inside the container by default.
 
-Passwords in the config are encrypted with a machine-local key, not a passphrase from this repository. The key file is created beside the config as `.veeam-vhc-aws.key` when you pass `-c`, or at the path in `VEEAM_VHC_AWS_KEY_FILE`. Mount that file with the config. A container home directory does not keep the default `~/.vhc/secret.key` across runs. On Windows the key blob is wrapped with DPAPI LocalMachine, and the file ACL is the access control.
+Mount the config **directory**, not only the file. Relative `state_file` and log paths resolve beside the config, and so does the key file.
+
+Passwords are stored as `ENC:` values, sealed with AES-GCM under a random key that is local to the machine, not a passphrase from this repository. The key file is `.veeam-vhc-aws.key` beside the config the command resolved (from `-c`, `VEEAM_VHC_AWS_CONFIG`, or `./veeam-vhc-aws.yaml`), or the path in `VEEAM_VHC_AWS_KEY_FILE`. Anyone who can read the key file can decrypt the passwords, so the key file's permissions are the protection: on Linux and macOS it is created owner-only (mode 600), and on Windows the key is wrapped with DPAPI LocalMachine and the file ACL controls access. An `ENC:` value written on another machine, or with another key file, does not decrypt; re-enter the password or run `encrypt-config` on a plaintext copy. Values written by older releases use a shared passphrase that ships in the source, so they are obfuscation only. They still decrypt, and `encrypt-config` rewraps them with the local key.
 
 > The Docker image is built with the .NET 10 SDK and runs as a self-contained binary on a minimal `runtime-deps` base image.
 
@@ -153,8 +155,9 @@ veeam-vhc-aws captures suppress <key> -c config.yaml
 veeam-vhc-aws captures unsuppress <key> -c config.yaml
 
 # Encrypt plaintext secrets (any key whose name contains password, token or secret,
-# the same keys the web UI encrypts) and rewrap legacy ENC: values, with the machine-local key
-veeam-vhc-aws encrypt-config -c config.yaml
+# the same keys the web UI encrypts) and rewrap legacy ENC: values, with the machine-local key.
+# encrypt-config takes --config only; it has no -c alias.
+veeam-vhc-aws encrypt-config --config config.yaml
 
 # Print version
 veeam-vhc-aws version
@@ -163,7 +166,7 @@ veeam-vhc-aws version
 veeam-vhc-aws all -c config.yaml --no-interactive
 ```
 
-`veeam-vhc-aws serve` listens on 127.0.0.1 unless you set `--bind`. A prometheus output in server mode also listens on 127.0.0.1.
+`veeam-vhc-aws serve` listens on 127.0.0.1:9100 and runs every 300 seconds unless you set `--bind`, `--port`, or `--interval`. It runs until stopped and does not set an exit code per cycle. A `prometheus` output with `mode: server` always listens on 127.0.0.1 (its `port`, default 9100); there is no bind option for it.
 
 ### Web Admin GUI
 
@@ -210,7 +213,7 @@ When run in an interactive terminal, veeam-vhc-aws renders a rich terminal UI us
 
 **First-run detection:** If you run `veeam-vhc-aws` with no arguments and no config file exists, the tool offers to launch the setup wizard automatically.
 
-**Setup wizard (`setup`):** A 7-step guided wizard that collects server details (with live connectivity test), notification channels, output options, and alert thresholds, then writes a config file. Passwords are encrypted with a machine-local key (`ENC:` prefix). Anyone who can read the key file can decrypt them. Use `--template` to copy the example config instead.
+**Setup wizard (`setup`):** A 7-step guided wizard that collects server details, notification channels (Slack, Teams, email, ntfy), output options, and alert thresholds, then writes a config file (default `./veeam-vhc-aws.yaml`, or `-o <path>`). It does not test connections itself; run `test-connection` afterwards. Defaults: `verify_ssl: true`, email `use_tls: true`, free space warning/critical 15%/5%, overage multiplier 1.5, orphan detection on, session lookback 24h. Passwords are encrypted with a machine-local key (`ENC:` prefix). Anyone who can read the key file can decrypt them. Use `--template` to copy the example config instead; without an interactive terminal, `setup` copies the template automatically. Neither overwrites an existing file without asking (`--template` refuses and leaves it alone).
 
 **Live monitor progress (`all`):** While monitors run, a live table shows each server × monitor with a real-time status indicator. Only shown when no `json_stdout` output handler is configured (to avoid mixing UI chrome with JSON output).
 
@@ -288,7 +291,7 @@ The daily summary uses your configured output handlers (same as alerts) but bypa
 | 2 | CRITICAL |
 | 3 | ERROR |
 
-The worst severity across all findings determines the exit code, making it CI/CD-friendly. A suppressed finding (`captures suppress`, the Alerts page, or `suppressions` in the config) does not count toward the exit code or the monitor's overall severity. A monitor that reported errors stays at least WARNING, because errors cannot be suppressed.
+The worst severity across all findings determines the exit code, making it CI/CD-friendly. `all`, `repo-health`, `retention`, `worker-health` and `summary` also exit 3 when startup fails (for example a config that does not parse), and exit 0 when no applicable server is configured (or, for `summary`, when `daily_summary.enabled` is false). `captures suppress` / `unsuppress` exit 1 when the key prefix matches nothing or more than one entry. A suppressed finding (`captures suppress`, the Alerts page, or `suppressions` in the config) does not count toward the exit code or the monitor's overall severity. A monitor that reported errors stays at least WARNING, because errors cannot be suppressed.
 
 ### Configuration
 
@@ -323,7 +326,7 @@ repo_health:
   lookback_overlap_minutes: 2     # Overlap buffer for adaptive window (default: 2)
 ```
 
-If a run fails (errors fetching data), the lookback window stays wide until the next fully clean run.
+If a run fails (errors fetching data), the lookback window stays wide until the next fully clean run. The max lookback defaults to 24 hours for `retention`, and for `repo_health` to `external_maintenance_lookback_hours` (default 48).
 
 #### Multi-Server
 
@@ -381,11 +384,11 @@ The setup wizard configures notifications for you, but you can also edit the con
 | `webhook` | `teams` | Microsoft Teams alerts |
 | `webhook` | `pagerduty` | PagerDuty incident management |
 | `webhook` | `generic` | Custom integrations |
-| `prometheus` | `pushgateway` | Push metrics to Pushgateway |
-| `prometheus` | `server` | Expose `/metrics` endpoint |
+| `prometheus` | `mode: pushgateway` (default) | Push metrics to Pushgateway (`url`) |
+| `prometheus` | `mode: server` | Expose `/metrics` on 127.0.0.1:`port` |
 | `email` | -- | SMTP email reports |
 
-Each handler supports `min_severity` to control when it fires (`ok`, `warning`, `critical`).
+`webhook` and `email` outputs support `min_severity` to control when they fire (`ok`, `warning`, `critical`, `error`). A webhook defaults to `ok` and email to `critical`.
 
 Webhook and Pushgateway URLs cannot target link-local addresses, `169.254.169.254`, or a loopback host. Set `allow_loopback: true` on that output to allow loopback. Private RFC 1918 addresses stay allowed. Sends do not follow redirects.
 
@@ -485,6 +488,13 @@ Start-ScheduledTask -TaskName "Veeam VHC AWS"
 
 #### Behavior changes (unreleased)
 
+- Admin UI auth: loopback binds stay open unless `ui --require-token` is set; any other bind requires the token. Token checks compare hashes, and the auth cookie is marked Secure when the request is HTTPS. Webhook URLs show as `********` in the Outputs page and `/api/config`, and a save keeps the stored URL. Changing a server URL in the UI requires entering the password again.
+- Outbound sends: webhook and Pushgateway URLs that target link-local addresses, `169.254.169.254`, or a loopback host are refused unless that output sets `allow_loopback: true`. Redirects are not followed. Webhook log lines name the host instead of the full URL.
+- `serve` and a `prometheus` output with `mode: server` listen on 127.0.0.1. `serve --bind <address>` restores a wider listener.
+- Paths: relative log, state and `json_file` paths resolve from the config file's directory and must stay inside it (or under `global.data_directory`); `..` and symlinks that escape are rejected. `setup.ps1` writes `data_directory: C:\ProgramData\VHC` and keeps state and logs there. Alert email renders finding text as text, not HTML.
+- Deduplication now applies to every webhook template (generic, slack, teams, pagerduty, ntfy) and to email, not only ntfy. A run with nothing new and nothing resolved sends nothing to those outputs; set `deduplicate: false` on a handler to send on every run. Email gained the `deduplicate` key (default `true`) and a checkbox on the Outputs page.
+- A suppressed finding no longer raises the exit code or the monitor's overall severity, so it also stops driving `min_severity` checks, PagerDuty severity, and the Prometheus overall-severity value. A run whose only problem is suppressed exits 0.
+- `captures suppress` also finds keys that exist only under active findings (the web Alerts page already did). The VBAWS worker-health check now pages through every session in the window (up to 10,000) instead of the first page, so failure rates on busy appliances can move. JSON state and `json_file` output are written to a temp file and renamed into place.
 - `encrypt-config` encrypts every key whose name contains `password`, `token` or `secret`, the same keys the web UI encrypts. Before, it only rewrote `password` and `smtp_password`. It now reads the value the way the app does: a single-quoted password is encrypted without its quotes (before, the quotes were encrypted with it, and the decrypted password was wrong), and a line with a trailing `# comment` is encrypted and keeps the comment (before, it was left in plaintext). Current `ENC:` values and all other keys are left byte-for-byte; legacy `ENC:` values are still rewrapped. Webhook URLs are not encrypted, because outputs read them as plain URLs.
 - `setup --template` and the README samples write `verify_ssl: true`, matching the web UI, the wizard, and `config/example.yaml`. Set `verify_ssl: false` only for a lab server with a self-signed certificate. `test-connection` suggests it when the certificate is rejected.
 - A partial `global:` block (for example only `timeout_seconds`, or `logging:` with only `level`) now keeps the defaults for every key it leaves out. Before, the partial block replaced the defaults, and monitors fell back to a 120-second `session_timeout_seconds` while the Settings page showed 600. The default is now 600 everywhere. An empty `global:` line also keeps the defaults.
@@ -496,14 +506,20 @@ Start-ScheduledTask -TaskName "Veeam VHC AWS"
 #### Windows Standalone
 
 ```powershell
-# 1. Remove the scheduled task
-Unregister-ScheduledTask -TaskName "Veeam VHC AWS" -Confirm:$false
-
-# 2. Delete the install directory (default: C:\Program Files\VHC)
-Remove-Item -Recurse -Force "$env:ProgramFiles\VHC"
+# Removes both scheduled tasks, the exe and wwwroot, then asks whether to delete config, state and logs
+.\setup.ps1 -Uninstall
 ```
 
-If you installed to a custom directory, replace the path accordingly.
+Or by hand:
+
+```powershell
+Unregister-ScheduledTask -TaskName "Veeam VHC AWS" -Confirm:$false
+Unregister-ScheduledTask -TaskName "Veeam VHC AWS Daily Summary" -Confirm:$false -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:ProgramFiles\VHC"   # install dir: exe, wwwroot, config
+Remove-Item -Recurse -Force "$env:ProgramData\VHC"    # state, logs, UI token
+```
+
+If you installed to a custom directory, pass `-InstallDir` or replace the path accordingly.
 
 #### From Source
 
@@ -540,7 +556,8 @@ docker rmi veeam-vhc-aws
 ### Running Tests
 
 ```bash
-dotnet test tests/VeeamVhcAws.Tests/
+dotnet test tests/VeeamVhcAws.Tests/     # unit and integration tests
+dotnet test tests/VeeamVhcAws.UiTests/   # bUnit tests for the admin UI pages
 ```
 
 ## ✍ Contributions

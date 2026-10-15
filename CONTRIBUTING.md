@@ -15,6 +15,10 @@ Please note we have a [Code of Conduct](#code-of-conduct). Please follow it in a
 
 We use GitHub's Issue Tracker to track bugs/feature Requests. Report a bug or feature request by [opening a new issue](https://github.com/VeeamHub/veeam-vhc-aws/issues/new/choose). It's that easy!
 
+## Product code vs. contributor tooling
+
+Some paths in this repository are tooling for contributors and coding agents (`.cursor/`, `.claude/`, `AGENTS.md`, `ISA.md`, `MEMORY/`, `.playwright-mcp/`). They are not part of the shipped tool. Keep product changes and tooling changes in separate commits and pull requests. [docs/upstream-contributing.md](docs/upstream-contributing.md) lists every path and how to shape a pull request to VeeamHub without the tooling.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the projects original open source license.
