@@ -4,6 +4,7 @@ using VeeamVhcAws.Core.Logging;
 
 namespace VeeamVhcAws.Tests.Core;
 
+[Collection("console")]
 public class LoggingSetupTests
 {
     [Fact]

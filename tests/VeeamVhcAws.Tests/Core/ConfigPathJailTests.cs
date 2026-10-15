@@ -5,6 +5,7 @@ using Xunit;
 
 namespace VeeamVhcAws.Tests.Core;
 
+[Collection("console")]
 public class ConfigPathJailTests : IDisposable
 {
     private readonly string _dir;
