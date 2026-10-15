@@ -1,0 +1,44 @@
+Content-Type: text/plain; charset=utf-8
+Title: Daily Summary: CRITICAL
+Priority: high
+Tags: rotating_light
+Markdown: yes
+**Daily Veeam Health Summary — {{DATE}}**
+
+**Issues (60):**
+🔴 [vbr1] repo:Repository-01 — Repository 1 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-02 — Repository 2 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-03 — Repository 3 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-04 — Repository 4 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-05 — Repository 5 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-06 — Repository 6 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-07 — Repository 7 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-08 — Repository 8 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-09 — Repository 9 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-10 — Repository 10 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-11 — Repository 11 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-12 — Repository 12 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-13 — Repository 13 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-14 — Repository 14 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-15 — Repository 15 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-16 — Repository 16 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-17 — Repository 17 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-18 — Repository 18 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-19 — Repository 19 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-20 — Repository 20 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-21 — Repository 21 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-22 — Repository 22 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-23 — Repository 23 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-24 — Repository 24 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-25 — Repository 25 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-26 — Repository 26 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-27 — Repository 27 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-28 — Repository 28 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-29 — Repository 29 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-30 — Repository 30 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-31 — Repository 31 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-32 — Repository 32 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-33 — Repository 33 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-34 — Repository 34 has been unreachable for longer than the configured threshold
+🔴 [vbr1] repo:Repository-35 — Repository 35 has been unreachable for longer than the configured thresh
+... (truncated)

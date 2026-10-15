@@ -39,7 +39,7 @@ public static class ServerContextBuilder
             vbawsClient = new VbawsClient(url, auth, verifySsl, timeout, retryCount, retryDelay);
         }
 
-        return new ServerContext(name, serverType, vbrClient, vbawsClient, new EmClient());
+        return new ServerContext(name, serverType, vbrClient, vbawsClient);
     }
 
     public static List<ServerContext> BuildAllServers(Dictionary<string, object> config)
