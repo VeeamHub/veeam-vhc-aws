@@ -51,7 +51,6 @@ public static class ConfigLoader
             {
                 ["free_space_warning_pct"] = 15,
                 ["free_space_critical_pct"] = 5,
-                ["rescan_on_unhealthy"] = true,
             },
             ["include_external_repos"] = true,
             ["check_external_maintenance"] = true,

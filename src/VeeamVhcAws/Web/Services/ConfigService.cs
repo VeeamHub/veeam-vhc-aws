@@ -140,11 +140,14 @@ public class ConfigService
                 : new Dictionary<string, object>();
 
             var existingList = existing.GetListOfSections("output");
+            var priorByLoadId = new Dictionary<string, Dictionary<string, object>>(existingList.Count);
+            for (int index = 0; index < existingList.Count; index++)
+                priorByLoadId[LoadedOutputId(index)] = existingList[index];
 
             var newList = new List<object>();
-            for (int i = 0; i < outputs.Count; i++)
+            foreach (var o in outputs)
             {
-                var o = outputs[i];
+                priorByLoadId.TryGetValue(o.Id ?? "", out var prior);
                 var entry = new Dictionary<string, object> { ["type"] = o.Type };
                 foreach (var (k, v) in o.Fields)
                 {
@@ -154,7 +157,7 @@ public class ConfigService
                         k.Equals("url", StringComparison.OrdinalIgnoreCase) &&
                         v is string submittedUrl && submittedUrl == "********")
                     {
-                        entry[k] = WebhookUrlFor(o.Id, existingList);
+                        entry[k] = WebhookUrlFor(prior);
                     }
                     else if (IsSecretKey(k))
                     {
@@ -165,7 +168,7 @@ public class ConfigService
                         }
                         else
                         {
-                            entry[k] = i < existingList.Count ? existingList[i].Get(k, "") : "";
+                            entry[k] = prior?.Get(k, "") ?? "";
                         }
                     }
                     else
@@ -173,10 +176,10 @@ public class ConfigService
                         entry[k] = v;
                     }
                 }
-                if (i < existingList.Count &&
-                    string.Equals(existingList[i].Get("type", ""), o.Type, StringComparison.OrdinalIgnoreCase))
+                if (prior != null &&
+                    string.Equals(prior.Get("type", ""), o.Type, StringComparison.OrdinalIgnoreCase))
                 {
-                    foreach (var (k, v) in existingList[i])
+                    foreach (var (k, v) in prior)
                     {
                         if (!entry.ContainsKey(k))
                             entry[k] = v;
@@ -228,15 +231,10 @@ public class ConfigService
     private static string LoadedOutputId(int index) =>
         LoadedOutputPrefix + index.ToString(CultureInfo.InvariantCulture);
 
-    private static string WebhookUrlFor(string? id, IReadOnlyList<Dictionary<string, object>> existingList)
+    private static string WebhookUrlFor(Dictionary<string, object>? prior)
     {
-        if (string.IsNullOrEmpty(id) || !id.StartsWith(LoadedOutputPrefix, StringComparison.Ordinal))
+        if (prior == null)
             return "";
-        if (!int.TryParse(id.AsSpan(LoadedOutputPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var index))
-            return "";
-        if (index < 0 || index >= existingList.Count)
-            return "";
-        var prior = existingList[index];
         if (!prior.Get("type", "").Equals("webhook", StringComparison.OrdinalIgnoreCase))
             return "";
         return prior.Get("url", "");

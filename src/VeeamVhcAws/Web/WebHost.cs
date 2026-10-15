@@ -50,9 +50,9 @@ public static class WebHost
 
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(auth);
-        builder.Services.AddScoped<StateService>();
+        builder.Services.AddSingleton<StateService>();
         builder.Services.AddSingleton(DailySummaryTasks.CreateDefault());
-        builder.Services.AddScoped<ConfigService>();
+        builder.Services.AddSingleton<ConfigService>();
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
         var app = builder.Build();

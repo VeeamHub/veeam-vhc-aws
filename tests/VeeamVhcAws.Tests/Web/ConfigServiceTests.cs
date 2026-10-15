@@ -174,6 +174,7 @@ public class ConfigServiceTests : IDisposable
     {
         var initial = "output:\n  - type: webhook\n    url: https://hooks.example/secret\n    template: generic\n    allow_loopback: true\n";
         var svc = BuildService(initial);
+        var loaded = svc.Load();
 
         svc.SaveOutputs(new[]
         {
@@ -181,7 +182,7 @@ public class ConfigServiceTests : IDisposable
             {
                 ["url"] = "https://hooks.example/secret",
                 ["template"] = "ntfy",
-            }, new HashSet<string>()),
+            }, new HashSet<string>(), loaded.Outputs[0].Id),
         });
 
         var output = ConfigLoader.LoadConfig(_configPath).GetListOfSections("output")[0];
@@ -195,6 +196,7 @@ public class ConfigServiceTests : IDisposable
     {
         var initial = "output:\n  - type: email\n    smtp_host: mail.example.com\n    smtp_port: 587\n    from_addr: a@b\n    to_addrs: c@d\n    smtp_username: user\n    smtp_password: \"ENC:originalcipher\"\n    use_tls: true\n";
         var svc = BuildService(initial);
+        var loaded = svc.Load();
 
         var edit = new OutputEdit(
             "email",
@@ -208,13 +210,51 @@ public class ConfigServiceTests : IDisposable
                 ["smtp_password"] = "********",
                 ["use_tls"] = true,
             },
-            new HashSet<string>()); // no secret changed
+            new HashSet<string>(),
+            loaded.Outputs[0].Id);
 
         svc.SaveOutputs(new[] { edit });
 
         var reloaded = ConfigLoader.LoadConfig(_configPath);
         var output = reloaded.GetListOfSections("output")[0];
         Assert.Equal("ENC:originalcipher", output.Get("smtp_password", ""));
+    }
+
+    [Fact]
+    public void SaveOutputs_DeleteHandlerInFront_KeepsTheEmailPassword()
+    {
+        var svc = BuildService("""
+            output:
+              - type: webhook
+                url: https://hooks.example/front
+                template: slack
+              - type: email
+                smtp_host: mail.example.com
+                smtp_port: 587
+                from_addr: a@b
+                to_addrs: c@d
+                smtp_username: user
+                smtp_password: "ENC:emailcipher"
+            """);
+        var email = svc.Load().Outputs[1];
+
+        svc.SaveOutputs(new[]
+        {
+            new OutputEdit("email", new Dictionary<string, object?>
+            {
+                ["smtp_host"] = "mail.example.com",
+                ["smtp_port"] = 587,
+                ["from_addr"] = "a@b",
+                ["to_addrs"] = "c@d",
+                ["smtp_username"] = "user",
+                ["smtp_password"] = "********",
+            }, new HashSet<string>(), email.Id),
+        });
+
+        var outputs = ConfigLoader.LoadConfig(_configPath).GetListOfSections("output");
+        Assert.Single(outputs);
+        Assert.Equal("email", outputs[0].Get("type", ""));
+        Assert.Equal("ENC:emailcipher", outputs[0].Get("smtp_password", ""));
     }
 
     [Fact]
