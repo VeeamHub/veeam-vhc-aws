@@ -11,8 +11,9 @@ public sealed record PinnedThirdPartyUsesFact(string RelativePath, string Expect
 
 public static class CiWorkflowContract
 {
-    public const string TruffleHogPin =
-        "trufflesecurity/trufflehog@6f3c981e7b77f235fd2702dd74af25fc4b72bf11 # v3.96.0";
+    // Only the action name: PinnedUsesForm already requires every action to be a full
+    // commit SHA with a tag comment. Pinning the exact SHA here failed every Dependabot bump.
+    public const string TruffleHogAction = "trufflesecurity/trufflehog@";
 
     public const string PinnedUsesForm = @"^[^\s]+ \S+@[0-9a-f]{40} # \S+$";
 
@@ -51,7 +52,7 @@ public static class CiWorkflowContract
         new LiteralFact(
             ".github/workflows/codeql.yml",
             "dotnet build src/VeeamVhcAws/VeeamVhcAws.csproj -c Release"),
-        new LiteralFact(".github/workflows/security.yml", TruffleHogPin),
+        new LiteralFact(".github/workflows/security.yml", TruffleHogAction),
         new PinnedThirdPartyUsesFact(".github/workflows", PinnedUsesForm),
     ];
 }
@@ -82,7 +83,7 @@ public class WorkflowContractTests
         var fact = Assert.Single(CiWorkflowContract.Required.OfType<PinnedThirdPartyUsesFact>());
         var lines = ThirdPartyUses(Path.Combine(RepoRoot(), fact.RelativePath));
 
-        Assert.Contains($"security.yml {CiWorkflowContract.TruffleHogPin}", lines);
+        Assert.Contains(lines, line => line.StartsWith($"security.yml {CiWorkflowContract.TruffleHogAction}", StringComparison.Ordinal));
         var offenders = lines.Where(line => !Regex.IsMatch(line, fact.ExpectedForm)).ToArray();
         Assert.Equal("", string.Join("\n", offenders));
     }
