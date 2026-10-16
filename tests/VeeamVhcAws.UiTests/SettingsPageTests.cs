@@ -9,7 +9,7 @@ public class SettingsPageTests
     public void FieldsAreNamed_AndSaveSurvivesReload()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Settings>();
+        var cut = ui.Context.Render<Settings>();
 
         UiHarness.AssertEveryControlHasName(cut);
         UiHarness.AssertNamed(cut, "settings-log-level", "Log level");
@@ -23,7 +23,7 @@ public class SettingsPageTests
         UiHarness.Click(cut, "Save Settings");
         Assert.Contains("Settings saved", cut.Markup);
 
-        var again = ui.Context.RenderComponent<Settings>();
+        var again = ui.Context.Render<Settings>();
         var selected = again.FindAll("#settings-log-level option").Single(o => o.HasAttribute("selected"));
         Assert.Equal("INFO", selected.GetAttribute("value"));
         Assert.Equal("./ops.log", again.Find("#settings-log-file").GetAttribute("value"));
@@ -49,7 +49,7 @@ public class SettingsPageTests
                 console: false
                 disk_warning_pct: 20
             """);
-        var cut = ui.Context.RenderComponent<Settings>();
+        var cut = ui.Context.Render<Settings>();
         UiHarness.Click(cut, "Save Settings");
 
         var yaml = File.ReadAllText(ui.ConfigPath);
@@ -62,7 +62,7 @@ public class SettingsPageTests
     {
         var host = new RecordingHost();
         using var ui = new UiHarness(tasks: host);
-        var cut = ui.Context.RenderComponent<Settings>();
+        var cut = ui.Context.Render<Settings>();
 
         cut.Find("#settings-daily-summary").Change(true);
         UiHarness.Click(cut, "Save Settings");

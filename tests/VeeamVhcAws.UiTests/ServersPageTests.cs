@@ -1,4 +1,5 @@
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using VeeamVhcAws.Web.Components.Pages;
 
 namespace VeeamVhcAws.UiTests;
@@ -9,7 +10,7 @@ public class ServersPageTests
     public void EmptyPage_ShowsOneAddButton()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Servers>();
+        var cut = ui.Context.Render<Servers>();
 
         Assert.Equal("+ Add Your First Server", cut.FindAll("button").Single().TextContent.Trim());
         Assert.Contains("No servers configured yet.", cut.Markup);
@@ -19,7 +20,7 @@ public class ServersPageTests
     public void AddServer_NamesEveryControl_DefaultsVerifySslOn_AndSaves()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Servers>();
+        var cut = ui.Context.Render<Servers>();
         UiHarness.Click(cut, "+ Add Your First Server");
 
         UiHarness.AssertEveryControlHasName(cut);
@@ -53,7 +54,7 @@ public class ServersPageTests
         Assert.Contains("ENC:", yaml);
         Assert.DoesNotContain("verify-secret", yaml);
 
-        var again = ui.Context.RenderComponent<Servers>();
+        var again = ui.Context.Render<Servers>();
         Assert.Contains("lab-vbr", again.Markup);
         Assert.DoesNotContain("No servers configured yet.", again.Markup);
     }
@@ -62,7 +63,7 @@ public class ServersPageTests
     public void Cancel_DiscardsTheDraft_AndEscapeClosesTheDialog()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Servers>();
+        var cut = ui.Context.Render<Servers>();
         UiHarness.Click(cut, "+ Add Your First Server");
         cut.Find("#server-name").Input("discard-me");
         cut.Find(".modal").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
@@ -76,7 +77,7 @@ public class ServersPageTests
     public void Delete_UsesDistinctNames_AndBackdropDoesNotCancel()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Servers>();
+        var cut = ui.Context.Render<Servers>();
         AddLab(cut);
 
         UiHarness.Click(cut, "Delete lab-vbr");
@@ -105,7 +106,7 @@ public class ServersPageTests
     public void EditCancel_KeepsTheSavedUrl()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Servers>();
+        var cut = ui.Context.Render<Servers>();
         AddLab(cut);
         UiHarness.Click(cut, "Edit lab-vbr");
         Assert.Equal("********", cut.Find("#server-password").GetAttribute("value"));
@@ -120,7 +121,7 @@ public class ServersPageTests
     public void EditUrl_WithoutANewPassword_IsRejected()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Servers>();
+        var cut = ui.Context.Render<Servers>();
         AddLab(cut);
         UiHarness.Click(cut, "Edit lab-vbr");
         cut.Find("#server-url").Input("https://lab-vbr.example:9420");
@@ -132,7 +133,7 @@ public class ServersPageTests
         Assert.DoesNotContain("9420", yaml);
     }
 
-    private static void AddLab(IRenderedFragment cut)
+    private static void AddLab(IRenderedComponent<IComponent> cut)
     {
         UiHarness.Click(cut, "+ Add Your First Server");
         cut.Find("#server-name").Input("lab-vbr");

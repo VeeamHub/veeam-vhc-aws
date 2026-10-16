@@ -8,7 +8,7 @@ public class ThresholdsPageTests
     public void RepoSave_PersistsTheWarningThreshold()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Thresholds>();
+        var cut = ui.Context.Render<Thresholds>();
 
         UiHarness.AssertEveryControlHasName(cut);
         UiHarness.AssertNamed(cut, "thresh-free-warn", "Free space warning threshold (% free)");
@@ -19,7 +19,7 @@ public class ThresholdsPageTests
         Assert.Contains("Repo Health thresholds saved", cut.Markup);
         Assert.Contains("free_space_warning_pct: 17", File.ReadAllText(ui.ConfigPath));
 
-        var again = ui.Context.RenderComponent<Thresholds>();
+        var again = ui.Context.Render<Thresholds>();
         Assert.Equal("17", again.Find("#thresh-free-warn").GetAttribute("value"));
     }
 
@@ -27,7 +27,7 @@ public class ThresholdsPageTests
     public void RetentionTab_SavesWithoutTouchingRepo()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Thresholds>();
+        var cut = ui.Context.Render<Thresholds>();
         UiHarness.Click(cut, "Retention");
         UiHarness.AssertNamed(cut, "thresh-overage", "Overage multiplier (restore points beyond policy × this = warning)");
         cut.Find("#thresh-exclude").Change("archive-2023");
@@ -56,7 +56,7 @@ public class ThresholdsPageTests
                 orphan_detection: true
               session_lookback_hours: 24
             """);
-        var cut = ui.Context.RenderComponent<Thresholds>();
+        var cut = ui.Context.Render<Thresholds>();
         UiHarness.Click(cut, "Retention");
         UiHarness.Click(cut, "Save Retention");
 
@@ -81,7 +81,7 @@ public class ThresholdsPageTests
                 zero_deleted_items_warning: true
                 recurring_failure_threshold: 3
             """);
-        var cut = ui.Context.RenderComponent<Thresholds>();
+        var cut = ui.Context.Render<Thresholds>();
         UiHarness.Click(cut, "Worker Health");
         UiHarness.Click(cut, "Save Worker Health");
 
@@ -92,7 +92,7 @@ public class ThresholdsPageTests
     public void WorkerTab_NamesFailureFields()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Thresholds>();
+        var cut = ui.Context.Render<Thresholds>();
         UiHarness.Click(cut, "Worker Health");
         UiHarness.AssertEveryControlHasName(cut);
         UiHarness.AssertNamed(cut, "thresh-failure-warn", "Session failure rate — warning threshold");

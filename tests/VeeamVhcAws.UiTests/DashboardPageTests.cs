@@ -15,7 +15,7 @@ public class DashboardPageTests
             ? "{\"findings\":{},\"captured_errors\":{},\"suppressions\":{}}"
             : "{\"last_run\":\"" + lastRun + "\",\"findings\":{},\"captured_errors\":{},\"suppressions\":{}}";
         using var ui = new UiHarness(state);
-        var cut = ui.Context.RenderComponent<Dashboard>();
+        var cut = ui.Context.Render<Dashboard>();
 
         Assert.Contains("No runs yet — 0 server(s) configured", cut.Markup);
         Assert.Contains("no runs yet", cut.Markup);
@@ -26,7 +26,7 @@ public class DashboardPageTests
     public void MissingStateFile_SaysNoRunsYet()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Dashboard>();
+        var cut = ui.Context.Render<Dashboard>();
 
         Assert.Contains("No runs yet — 0 server(s) configured", cut.Markup);
         Assert.Contains("Add a server", cut.Markup);
@@ -39,7 +39,7 @@ public class DashboardPageTests
         using var ui = new UiHarness("""
             {"last_run":"2026-10-13T12:00:00Z","findings":{},"captured_errors":{},"suppressions":{}}
             """);
-        var cut = ui.Context.RenderComponent<Dashboard>();
+        var cut = ui.Context.Render<Dashboard>();
 
         Assert.Contains("All monitors clear — 0 server(s), 0 findings", cut.Markup);
         Assert.DoesNotContain("No runs yet", cut.Markup);
@@ -57,7 +57,7 @@ public class DashboardPageTests
               "suppressions": {}
             }
             """);
-        var cut = ui.Context.RenderComponent<Dashboard>();
+        var cut = ui.Context.Render<Dashboard>();
 
         Assert.Contains("1 warning", cut.Markup);
         Assert.Contains("action required", cut.Markup);

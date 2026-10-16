@@ -10,7 +10,7 @@ public class OutputsPageTests
     public void EmptyPage_ShowsOneAddButton()
     {
         using var ui = new UiHarness(writeConfig: false);
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
 
         Assert.Equal("+ Add Your First Handler", cut.FindAll("button").Single().TextContent.Trim());
         Assert.Contains("No output handlers configured.", cut.Markup);
@@ -20,7 +20,7 @@ public class OutputsPageTests
     public void NewEmailHandler_NamesThePassword_AndStartsBlank()
     {
         using var ui = new UiHarness(writeConfig: false);
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
         UiHarness.Click(cut, "+ Add Your First Handler");
         cut.Find("#output-type").Change("email");
 
@@ -34,7 +34,7 @@ public class OutputsPageTests
     public void BlankWebhook_ShowsTheUrlError_AndCancelWritesNothing()
     {
         using var ui = new UiHarness(writeConfig: false);
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
         UiHarness.Click(cut, "+ Add Your First Handler");
         UiHarness.Click(cut, "Save");
         Assert.Contains("Webhook URL is required", cut.Markup);
@@ -49,7 +49,7 @@ public class OutputsPageTests
     public void JsonFile_Saves_AndDeleteUsesADistinctName()
     {
         using var ui = new UiHarness(writeConfig: false);
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
         UiHarness.Click(cut, "+ Add Your First Handler");
         cut.Find("#output-type").Change("json_file");
         UiHarness.AssertNamed(cut, "output-path", "File path");
@@ -75,7 +75,7 @@ public class OutputsPageTests
     {
         using var ui = new UiHarness(writeConfig: false);
         File.WriteAllText(ui.ConfigPath, "output:\n  - type: json_stdout\n");
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
 
         Assert.Contains(StdoutOnlyOutput.Warning, cut.Markup);
     }
@@ -93,7 +93,7 @@ public class OutputsPageTests
                   - ops@example.com
                   - oncall@example.com
             """);
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
         UiHarness.Click(cut, "Edit email 1");
 
         Assert.Equal("ops@example.com, oncall@example.com", cut.Find("#output-to").GetAttribute("value"));
@@ -106,13 +106,13 @@ public class OutputsPageTests
     public void WebhookReload_ShowsTheMask_AndKeepsTheStoredUrl()
     {
         using var ui = new UiHarness(writeConfig: false);
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
         UiHarness.Click(cut, "+ Add Your First Handler");
         cut.Find("#output-url").Input("https://hooks.example/services/T123/SECRET");
         cut.Find("#output-template").Change("ntfy");
         UiHarness.Click(cut, "Save");
 
-        var again = ui.Context.RenderComponent<OutputsPage>();
+        var again = ui.Context.Render<OutputsPage>();
         Assert.Contains("********", again.Markup);
         Assert.DoesNotContain("T123", again.Markup);
         Assert.DoesNotContain("SECRET", again.Markup);
@@ -142,7 +142,7 @@ public class OutputsPageTests
                 url: https://hooks.example/second
                 template: ntfy
             """);
-        var cut = ui.Context.RenderComponent<OutputsPage>();
+        var cut = ui.Context.Render<OutputsPage>();
         Assert.Contains("********", cut.Markup);
         Assert.DoesNotContain("https://hooks.example/first", cut.Markup);
         Assert.DoesNotContain("https://hooks.example/second", cut.Markup);
