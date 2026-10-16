@@ -13,7 +13,7 @@
     }
 </div>
 
-<p class="muted">Notification channels for monitor findings. Multiple handlers can be configured — all fire on every run.</p>
+<p class="muted">Where alerts are sent. Webhooks and email send only when something is new or resolved.</p>
 
 @if (_cfg is not null && StdoutOnlyOutput.IsOnly(_cfg.Outputs.Select(o => o.Type)))
 {

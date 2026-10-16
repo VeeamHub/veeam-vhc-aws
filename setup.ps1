@@ -23,7 +23,13 @@ param(
     [string]$SummaryTime = "",
 
     [Parameter(Mandatory=$false)]
-    [switch]$NoSummary
+    [switch]$NoSummary,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$NoShortcut,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$DesktopShortcut
 )
 
 # --- Require PowerShell 7+ ---
@@ -41,6 +47,97 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($NoShortcut -and $DesktopShortcut) {
+    Write-Host "ERROR: -NoShortcut and -DesktopShortcut cannot be used together." -ForegroundColor Red
+    exit 1
+}
+
+# --- Admin UI shortcut helpers ---
+# The shortcut starts the web admin UI elevated (the data directory is locked to
+# SYSTEM + Administrators). Its arguments never carry --bind or any auth override,
+# so the UI keeps its secure default of 127.0.0.1 only.
+
+function Get-VhcShortcutPaths {
+    return [pscustomobject]@{
+        StartMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\VHC AWS Admin.lnk"
+        Desktop   = Join-Path $env:PUBLIC "Desktop\VHC AWS Admin.lnk"
+    }
+}
+
+function Get-VhcShortcutArguments {
+    param([Parameter(Mandatory=$true)][string]$ConfigPath)
+    return "ui -c `"$ConfigPath`""
+}
+
+# Sets the "Run as administrator" flag (SLDF_RUNAS_USER, 0x20) in the .lnk header
+# byte at offset 0x15. Pure function over a byte array so it is testable off-Windows.
+function Set-LnkRunAsAdministrator {
+    param([Parameter(Mandatory=$true)][byte[]]$Bytes)
+    if ($Bytes.Length -le 0x15) {
+        throw "Shortcut data is too short ($($Bytes.Length) bytes) to be a .lnk file."
+    }
+    $patched = [byte[]]$Bytes.Clone()
+    $patched[0x15] = [byte]($patched[0x15] -bor 0x20)
+    return ,$patched
+}
+
+# Creates one shortcut via WScript.Shell. Returns $true on success; on any failure
+# prints a yellow warning with the CLI fallback and returns $false (never throws).
+function New-VhcAdminShortcut {
+    param(
+        [Parameter(Mandatory=$true)][string]$ShortcutPath,
+        [Parameter(Mandatory=$true)][string]$ExePath,
+        [Parameter(Mandatory=$true)][string]$ConfigPath,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectory
+    )
+    try {
+        $parent = Split-Path -Parent $ShortcutPath
+        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+
+        $shell = New-Object -ComObject WScript.Shell
+        $link = $shell.CreateShortcut($ShortcutPath)
+        $link.TargetPath = $ExePath
+        $link.Arguments = Get-VhcShortcutArguments -ConfigPath $ConfigPath
+        $link.WorkingDirectory = $WorkingDirectory
+        $link.Description = "Open the Veeam VHC AWS web admin UI (runs as administrator)"
+        $link.WindowStyle = 1
+        $link.IconLocation = "$ExePath,0"
+        $link.Save()
+
+        $patched = Set-LnkRunAsAdministrator -Bytes ([IO.File]::ReadAllBytes($ShortcutPath))
+        [IO.File]::WriteAllBytes($ShortcutPath, $patched)
+        return $true
+    } catch {
+        Write-Host "  -> WARNING: Could not create shortcut '$ShortcutPath': $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  -> Start the admin UI from an elevated shell instead:" -ForegroundColor Yellow
+        Write-Host "       & '$ExePath' ui -c '$ConfigPath'" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+# Creates/refreshes the Start Menu shortcut (and the Desktop one with -DesktopShortcut).
+# Returns $true only when every requested shortcut was created.
+function Install-VhcAdminShortcuts {
+    param(
+        [Parameter(Mandatory=$true)][string]$ExePath,
+        [Parameter(Mandatory=$true)][string]$ConfigPath,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectory,
+        [bool]$IncludeDesktop = $false
+    )
+    $paths = Get-VhcShortcutPaths
+    $targets = @($paths.StartMenu)
+    if ($IncludeDesktop) { $targets += $paths.Desktop }
+    $allOk = $true
+    foreach ($target in $targets) {
+        if (New-VhcAdminShortcut -ShortcutPath $target -ExePath $ExePath -ConfigPath $ConfigPath -WorkingDirectory $WorkingDirectory) {
+            Write-Host "  -> Shortcut: $target" -ForegroundColor Green
+        } else {
+            $allOk = $false
+        }
+    }
+    return $allOk
+}
 
 function ConvertTo-ObfuscatedPassword {
     param([string]$Plaintext)
@@ -105,6 +202,14 @@ if ($Uninstall) {
     if (Test-Path $wwwPath) {
         Remove-Item $wwwPath -Recurse -Force
         Write-Host "  -> Removed $wwwPath" -ForegroundColor Green
+    }
+
+    $shortcutPaths = Get-VhcShortcutPaths
+    foreach ($lnk in @($shortcutPaths.StartMenu, $shortcutPaths.Desktop)) {
+        if (Test-Path $lnk) {
+            Remove-Item $lnk -Force
+            Write-Host "  -> Removed shortcut $lnk" -ForegroundColor Green
+        }
     }
 
     $dataDir = Join-Path $env:ProgramData "VHC"
@@ -421,6 +526,12 @@ if ($Upgrade) {
         Write-Host "  Run setup.ps1 without -Upgrade to do a fresh install." -ForegroundColor Yellow
     }
 
+    # Create/refresh the admin UI shortcut(s) so they track the new exe
+    $upgradeShortcutOk = $true
+    if (-not $NoShortcut) {
+        $upgradeShortcutOk = Install-VhcAdminShortcuts -ExePath $exeDest -ConfigPath $configPath -WorkingDirectory $InstallDir -IncludeDesktop ([bool]$DesktopShortcut)
+    }
+
     # Re-enable tasks after upgrade
     foreach ($tn in $taskNames) {
         Enable-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue | Out-Null
@@ -434,6 +545,10 @@ if ($Upgrade) {
     }
     Write-Host "Scheduled task will use the new version on its next run." -ForegroundColor Green
     Write-Host "Manual run: & '$exeDest' all --config '$configPath'" -ForegroundColor Cyan
+    if (-not $NoShortcut -and $upgradeShortcutOk) {
+        Write-Host "Admin UI:   Start Menu -> VHC AWS Admin" -ForegroundColor Cyan
+    }
+    Write-Host "Admin UI (CLI, elevated shell): & '$exeDest' ui -c '$configPath'" -ForegroundColor Cyan
     Write-Host ""
     exit 0
 }
@@ -961,6 +1076,14 @@ try {
     Write-Host "  -> The scheduled task is still configured. Check config and try manually." -ForegroundColor Yellow
 }
 
+# --- Admin UI shortcut (never fails the install) ---
+$shortcutOk = $true
+if (-not $NoShortcut) {
+    Write-Host ""
+    Write-Host "Creating admin UI shortcut" -ForegroundColor Yellow
+    $shortcutOk = Install-VhcAdminShortcuts -ExePath $exeFullPath -ConfigPath $configPath -WorkingDirectory $InstallDir -IncludeDesktop ([bool]$DesktopShortcut)
+}
+
 # --- 5. Success ---
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
@@ -986,6 +1109,10 @@ Write-Host ""
 Write-Host "  Manual run:   & '$exeFullPath' all --config '$configPath'" -ForegroundColor Cyan
 Write-Host "  View logs:    Get-Content '$logPath' -Tail 50" -ForegroundColor Cyan
 Write-Host "  Edit config:  notepad '$configPath'" -ForegroundColor Cyan
+if (-not $NoShortcut -and $shortcutOk) {
+    Write-Host "  Admin UI:     Start Menu -> VHC AWS Admin" -ForegroundColor Cyan
+}
+Write-Host "  Admin UI (CLI, elevated shell): & '$exeFullPath' ui -c '$configPath'" -ForegroundColor Cyan
 Write-Host ""
 
 # TODO: Send a notification (via configured output handlers) when uninstall completes,

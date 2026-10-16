@@ -27,9 +27,10 @@ This directory is the maintained source for verifying the web admin UI. Read thi
 ## Features
 
 - [Servers](./servers.md) adds, edits, and deletes a VBR or VBAWS server. This is the path that creates a config file from an empty directory.
-- [Dashboard](./dashboard.md) shows the status banner, finding counts, and the server list.
+- [Dashboard](./dashboard.md) shows the getting-started checklist, the status banner, finding counts, and the server list.
 - [Alerts](./alerts.md) filters findings and suppresses one. An empty install has no rows.
 - [Outputs](./outputs.md) adds, edits, and deletes a notification handler.
 - [Thresholds](./thresholds.md) edits repo, retention, and worker thresholds.
 - [Settings](./settings.md) edits logging, HTTP tuning, and the daily summary toggle.
 - [Captures](./captures.md) lists captured errors and suppresses one. An empty install has no rows.
+- [Help](./help.md) renders the embedded user guide and its anchor links.

@@ -18,6 +18,10 @@ public record WebHostOptions(string ConfigPath, string BindAddress, int Port);
 
 public static class WebHost
 {
+    /// <summary>Constant marker on every response so a second `ui` launch can recognise a running instance.</summary>
+    public const string IdentityHeader = "X-VHC-AWS-UI";
+    public const string IdentityHeaderValue = "1";
+
     private static readonly SerilogILogger Logger = Log.ForContext(typeof(WebHost));
 
     public static Task RunAsync(WebHostOptions options, AuthOptions auth, CancellationToken cancellationToken)
@@ -56,6 +60,12 @@ public static class WebHost
 
         var app = builder.Build();
 
+        // Runs before auth so 401 responses also carry the marker; it discloses nothing but "this is the VHC UI".
+        app.Use((context, next) =>
+        {
+            context.Response.Headers[IdentityHeader] = IdentityHeaderValue;
+            return next();
+        });
         app.UseRouting();
         app.UseMiddleware<AuthMiddleware>();
         app.UseAntiforgery();

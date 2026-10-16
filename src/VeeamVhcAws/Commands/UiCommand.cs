@@ -1,5 +1,7 @@
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.Diagnostics;
+using System.Net.Sockets;
 using Spectre.Console;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Logging;
@@ -29,8 +31,16 @@ public static class UiCommand
         command.AddOption(regenTokenOption);
         command.AddOption(requireTokenOption);
 
-        command.SetHandler(async (string? config, int port, string bind, bool noBrowser, bool regenToken, bool requireToken) =>
+        command.SetHandler(async (InvocationContext context) =>
         {
+            var parsed = context.ParseResult;
+            var config = parsed.GetValueForOption(configOption);
+            var port = parsed.GetValueForOption(portOption);
+            var bind = parsed.GetValueForOption(bindOption)!;
+            var noBrowser = parsed.GetValueForOption(noBrowserOption);
+            var regenToken = parsed.GetValueForOption(regenTokenOption);
+            var requireToken = parsed.GetValueForOption(requireTokenOption);
+
             var configPath = ConfigLoader.GetConfigPath(config);
             SecretKeyStore.BindProcessDirectory(configPath);
             if (File.Exists(configPath))
@@ -55,6 +65,27 @@ public static class UiCommand
 
             var isLoopback = IsLoopback(bind);
             var auth = BuildAuthOptions(isLoopback, requireToken, tokenPath);
+
+            var existing = await DetectPortAsync(port, PortProbeTimeout);
+            if (existing == PortState.Foreign)
+            {
+                Console.Error.WriteLine(
+                    $"Port {port} is already in use by another program. Choose a different port with --port <number>.");
+                context.ExitCode = 1;
+                return;
+            }
+            if (existing is PortState.OursUi or PortState.OursUiTokenRequired)
+            {
+                var runningUrl = $"http://127.0.0.1:{port}";
+                Console.WriteLine($"The admin UI is already running at {runningUrl}");
+                // The running instance may require the token even when this launch would not
+                // (it was started with --bind or --require-token). Reuse the token it reads.
+                var token = auth.RequireToken ? auth.Token
+                    : existing == PortState.OursUiTokenRequired ? ReadExistingToken(tokenPath) : null;
+                if (!noBrowser && TerminalCapabilities.IsInteractive)
+                    OpenBrowser(string.IsNullOrEmpty(token) ? runningUrl : $"{runningUrl}/?t={token}");
+                return;
+            }
 
             var options = new WebHostOptions(configPath, bind, port);
             using var cts = new CancellationTokenSource();
@@ -93,9 +124,57 @@ public static class UiCommand
                 await WebHost.RunAsync(options, auth, cts.Token);
             }
             catch (OperationCanceledException) { /* clean shutdown */ }
-        }, configOption, portOption, bindOption, noBrowserOption, regenTokenOption, requireTokenOption);
+        });
 
         return command;
+    }
+
+    internal enum PortState { Free, OursUi, OursUiTokenRequired, Foreign }
+
+    private static readonly TimeSpan PortProbeTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Decides whether the target port is free, held by a running VHC admin UI, or held by something else.
+    /// Always probes 127.0.0.1 (even when the UI binds 0.0.0.0) and never sends credentials.
+    /// </summary>
+    internal static async Task<PortState> DetectPortAsync(int port, TimeSpan timeout)
+    {
+        using (var tcp = new TcpClient())
+        {
+            using var connectCts = new CancellationTokenSource(timeout);
+            try
+            {
+                await tcp.ConnectAsync(System.Net.IPAddress.Loopback, port, connectCts.Token);
+            }
+            catch (SocketException)
+            {
+                return PortState.Free;
+            }
+            catch (OperationCanceledException)
+            {
+                // Something accepted the SYN but never completed: the port is occupied.
+                return PortState.Foreign;
+            }
+        }
+
+        try
+        {
+            using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false })
+            {
+                Timeout = timeout,
+            };
+            using var response = await http.GetAsync($"http://127.0.0.1:{port}/", HttpCompletionOption.ResponseHeadersRead);
+            if (!response.Headers.TryGetValues(WebHost.IdentityHeader, out var values)
+                || !values.Contains(WebHost.IdentityHeaderValue))
+                return PortState.Foreign;
+            return response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                ? PortState.OursUiTokenRequired
+                : PortState.OursUi;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            return PortState.Foreign;
+        }
     }
 
     private static bool IsLoopback(string bind) =>
@@ -116,6 +195,19 @@ public static class UiCommand
 
         var token = ReadOrCreateToken(tokenPath);
         return new AuthOptions { RequireToken = true, Token = token };
+    }
+
+    private static string? ReadExistingToken(string path)
+    {
+        try
+        {
+            var existing = File.Exists(path) ? File.ReadAllText(path).Trim() : "";
+            return existing.Length >= 32 ? existing : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static string ReadOrCreateToken(string path)

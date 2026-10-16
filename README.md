@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="https://github.com/VeeamHub/veeam-vhc-aws/releases/latest"><strong>Download Latest Release</strong></a> &nbsp;&middot;&nbsp;
+  <a href="docs/USER_GUIDE.md"><strong>User Guide</strong></a> &nbsp;&middot;&nbsp;
   <a href="https://github.com/VeeamHub/veeam-healthcheck"><strong>Veeam Health Check</strong></a> &nbsp;&middot;&nbsp;
   <a href="https://github.com/VeeamHub/veeam-vhc-aws/issues/new/choose"><strong>Report an Issue</strong></a>
 </p>
@@ -32,19 +33,18 @@
 # 1. Download the latest release zip, extract it, then in PowerShell 7+ (pwsh) as Admin:
 .\setup.ps1
 
-# 2. Launch the web admin GUI to add servers and view alerts (setup.ps1 does not add the exe to PATH):
-cd "$env:ProgramFiles\VHC"
-.\veeam-vhc-aws.exe ui -c .\veeam-vhc-aws.yaml
-
-#    Your browser opens to http://127.0.0.1:9101
-#    -> click "+ Add Server" to onboard your first VBR or VBAWS server
-#    -> the Dashboard shows live status; the Alerts page lets you suppress with one click
+# 2. Open the web admin UI: Start Menu -> "VHC AWS Admin" (accept the admin prompt).
+#    A console window opens and your browser goes to http://127.0.0.1:9101
+#    -> follow the "Getting started" checklist on the Dashboard
+#    -> the Help page in the top bar explains every page
 
 # 3. The scheduled task runs every 5 minutes in the background (-IntervalMinutes changes it).
-#    Open the UI any time with the command from step 2.
+#    Close the UI's console window when you're done; monitoring keeps running.
 ```
 
-**Already installed?** Run `.\veeam-vhc-aws.exe ui -c .\veeam-vhc-aws.yaml` from the install directory and open <http://127.0.0.1:9101>. Without `-c` (or `VEEAM_VHC_AWS_CONFIG`), every command looks for `veeam-vhc-aws.yaml` in the current directory.
+**Prefer the command line?** From an elevated PowerShell: `& "$env:ProgramFiles\VHC\veeam-vhc-aws.exe" ui -c "$env:ProgramFiles\VHC\veeam-vhc-aws.yaml"`. Without `-c` (or `VEEAM_VHC_AWS_CONFIG`), every command looks for `veeam-vhc-aws.yaml` in the current directory.
+
+**Already using VHC AWS with YAML?** Nothing changes. The scheduled task works as before, and the web UI is optional: it edits the same `veeam-vhc-aws.yaml` and only runs while you have it open. The [User Guide](docs/USER_GUIDE.md) starts with what the UI means for you, and the same guide is on the UI's **Help** page.
 
 **Prefer YAML?** Run `veeam-vhc-aws setup` for the interactive terminal wizard, or edit `C:\Program Files\VHC\veeam-vhc-aws.yaml` directly.
 
@@ -84,6 +84,7 @@ veeam-vhc-aws all -c config.yaml --no-interactive
    - Configuring your VBR and/or VBAWS servers
    - Choosing how you want to be notified (ntfy, Slack, Teams, PagerDuty, email, or multiple)
    - Creating a Windows Scheduled Task to run automatically every 5 minutes (`-IntervalMinutes` changes that; `-Upgrade` leaves an existing task interval alone)
+   - Adding a **VHC AWS Admin** shortcut to the Start Menu for all users. It opens the web UI elevated, on localhost only. `-DesktopShortcut` also puts one on the Public Desktop; `-NoShortcut` skips both.
 
 That's it. The monitor is now running on a schedule and will alert you when issues are detected.
 
@@ -170,7 +171,15 @@ veeam-vhc-aws all -c config.yaml --no-interactive
 
 ### Web Admin GUI
 
-The `ui` command launches a browser-based admin dashboard — embedded ASP.NET Core + Blazor Server hosted by the same `veeam-vhc-aws.exe`. No separate install or web server required.
+The `ui` command launches a browser-based admin dashboard — embedded ASP.NET Core + Blazor Server hosted by the same `veeam-vhc-aws.exe`. No separate install or web server required. On a Windows install, the **VHC AWS Admin** Start Menu shortcut runs it for you. New to the UI? Read the [User Guide](docs/USER_GUIDE.md), which is also the UI's **Help** page.
+
+| First run: the Getting started checklist | Day to day: the Dashboard |
+|---|---|
+| ![Dashboard with the Getting started checklist on an empty install](docs/images/ui-getting-started.png) | ![Dashboard showing two servers and three active findings](docs/images/ui-dashboard.png) |
+| **Alerts: suppress with one click** | **Help: the user guide, in the app** |
+| ![Alerts page listing one critical and two warning findings](docs/images/ui-alerts.png) | ![Help page with the On this page contents list](docs/images/ui-help.png) |
+
+<sub>Screenshots use a demo config with made-up server names.</sub>
 
 ```bash
 # Localhost-only (default) — admin uses browser on the same machine as the tool
@@ -186,17 +195,20 @@ veeam-vhc-aws ui --regen-token
 veeam-vhc-aws ui -c config.yaml --no-browser
 ```
 
+If the UI is already running on that port, a second `ui` opens the browser to it and exits instead of failing. If another program holds the port, `ui` says so; pick a different `--port`.
+
 **Pages:**
 
 | Page | What you can do |
 |---|---|
-| **Dashboard** | At-a-glance status banner, per-server health cards, last-run time, finding counts |
+| **Dashboard** | At-a-glance status banner, per-server health cards, last-run time, finding counts. A **Getting started** checklist shows until a server is added and connected, an output is configured, and the first scheduled run has landed. |
 | **Alerts** | Live table of active findings with severity badges. **Click [Suppress] to silence an alert.** Filter by severity/server, search by resource. Auto-refreshes every 5s. |
 | **Servers** | Add/edit/delete VBR and VBAWS servers via forms. Passwords are encrypted on save with a machine-local key and stored with an `ENC:` prefix. Existing values written by the old shared passphrase still decrypt. `encrypt-config` rewrites those legacy values. A server URL change requires the password again. |
 | **Outputs** | Add/edit/delete notification channels — webhook (Slack/Teams/ntfy/PagerDuty), email (SMTP), Prometheus, JSON file. Per-type form fields. |
 | **Thresholds** | Tabbed editor for per-monitor thresholds (Repo Health / Retention / Worker Health). |
 | **Captures** | Historical error log with filter (suppressed/unsuppressed). Same suppress/unsuppress controls as Alerts. |
 | **Settings** | Global config: logging level, HTTP timeouts, retry counts, page sizes, daily summary toggle. |
+| **Help** | The [User Guide](docs/USER_GUIDE.md), rendered in the app. |
 
 **Authentication:**
 
@@ -488,6 +500,7 @@ Start-ScheduledTask -TaskName "Veeam VHC AWS"
 
 #### Behavior changes (unreleased)
 
+- Web UI: a **Help** page renders the [User Guide](docs/USER_GUIDE.md), every page has a one-line description, and the Dashboard shows a **Getting started** checklist until setup is complete. `setup.ps1` adds an all-users **VHC AWS Admin** Start Menu shortcut that opens the UI elevated on localhost (`-DesktopShortcut` adds a Public Desktop icon, `-NoShortcut` skips both, `-Uninstall` removes them). A second `ui` on a port where the UI is already running opens the browser to it and exits 0. No config keys or scheduled-task behavior changed.
 - Admin UI auth: loopback binds stay open unless `ui --require-token` is set; any other bind requires the token. Token checks compare hashes, and the auth cookie is marked Secure when the request is HTTPS. Webhook URLs show as `********` in the Outputs page and `/api/config`, and a save keeps the stored URL. Changing a server URL in the UI requires entering the password again.
 - Outbound sends: webhook and Pushgateway URLs that target link-local addresses, `169.254.169.254`, or a loopback host are refused unless that output sets `allow_loopback: true`. Redirects are not followed. Webhook log lines name the host instead of the full URL.
 - `serve` and a `prometheus` output with `mode: server` listen on 127.0.0.1. `serve --bind <address>` restores a wider listener.
@@ -506,7 +519,8 @@ Start-ScheduledTask -TaskName "Veeam VHC AWS"
 #### Windows Standalone
 
 ```powershell
-# Removes both scheduled tasks, the exe and wwwroot, then asks whether to delete config, state and logs
+# Removes both scheduled tasks, the Start Menu and Desktop shortcuts, the exe and wwwroot,
+# then asks whether to delete config, state and logs
 .\setup.ps1 -Uninstall
 ```
 
@@ -515,6 +529,7 @@ Or by hand:
 ```powershell
 Unregister-ScheduledTask -TaskName "Veeam VHC AWS" -Confirm:$false
 Unregister-ScheduledTask -TaskName "Veeam VHC AWS Daily Summary" -Confirm:$false -ErrorAction SilentlyContinue
+Remove-Item -Force -ErrorAction SilentlyContinue "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\VHC AWS Admin.lnk", "$env:PUBLIC\Desktop\VHC AWS Admin.lnk"
 Remove-Item -Recurse -Force "$env:ProgramFiles\VHC"   # install dir: exe, wwwroot, config
 Remove-Item -Recurse -Force "$env:ProgramData\VHC"    # state, logs, UI token
 ```

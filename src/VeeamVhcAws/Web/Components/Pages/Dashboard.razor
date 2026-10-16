@@ -7,6 +7,7 @@
 <PageTitle>Dashboard — Veeam VHC AWS</PageTitle>
 
 <h1>Dashboard</h1>
+<p class="muted">Overall health of every monitored server. The scheduled task updates it on every run.</p>
 
 @if (_state is null || _cfg is null)
 {
@@ -25,6 +26,31 @@ else
     var findingsClass = FindingsCardClass(crit, warn, err, hasRun);
     var errorsClass   = ErrorsCardClass(_state.CapturedErrors);
     var lastRunClass  = LastRunCardClass(_state.LastRun);
+
+    var steps = GettingStarted.Evaluate(_cfg, _state);
+    var nextIndex = steps.ToList().FindIndex(x => !x.Done);
+    if (nextIndex >= 0)
+    {
+        <section class="card getting-started" aria-labelledby="getting-started-title">
+            <div class="getting-started-head">
+                <h2 id="getting-started-title">Getting started</h2>
+                <a href="help">Read the guide</a>
+            </div>
+            <ol class="checklist">
+                @for (var i = 0; i < steps.Count; i++)
+                {
+                    var step = steps[i];
+                    <li class="@(step.Done ? "done" : i == nextIndex ? "next" : "")">
+                        <span class="check" aria-hidden="true">@(step.Done ? "✓" : "○")</span>
+                        <div>
+                            <strong>@step.Title</strong>@(step.Done ? " (done)" : i == nextIndex ? " (next)" : "")
+                            <p class="muted">@step.HowTo <a href="@step.Href">@step.LinkText</a></p>
+                        </div>
+                    </li>
+                }
+            </ol>
+        </section>
+    }
 
     <section class="status-banner @(pending ? "pending" : clear ? "ok" : "alert")">
         @if (pending)
