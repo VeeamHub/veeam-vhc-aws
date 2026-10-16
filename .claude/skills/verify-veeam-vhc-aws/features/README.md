@@ -22,7 +22,7 @@ This directory is the maintained source for verifying the web admin UI. Read thi
 - Record the feature file name with the evidence.
 - A flash message by itself is not proof. Reload the page or open the other page that shows the same data.
 - If a path cannot be reached, report the command and the missing precondition. Do not substitute a different page and call the feature verified.
-- `GET /api/config` and `POST /api/alerts/{key}/suppress` are not proof. The operator uses the pages below.
+- `GET /api/config` is not proof. The operator uses the pages below.
 
 ## Features
 

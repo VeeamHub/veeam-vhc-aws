@@ -67,7 +67,7 @@ The browser talks to the UI with role, accessible name, and the visible label te
 
 `click` uses an exact accessible name. `wait-heading` waits for an exact heading. `wait-text` waits for a substring.
 
-Do not prove a save with `POST /api/alerts` or `GET /api/config`. Those routes exist, and they are not the page the operator uses.
+Do not prove a save with `GET /api/config`. That route exists, and it is not the page the operator uses. There is no suppress API; suppress happens on the page.
 
 Buttons are inert until the Blazor circuit connects. `browser goto` waits for the page websocket and for the `Loading…` line to disappear before it returns.
 

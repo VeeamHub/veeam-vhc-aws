@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.StaticFiles;
@@ -70,18 +69,10 @@ public static class WebHost
         app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/api/state", (StateService s) => Results.Ok(s.Load()));
         app.MapGet("/api/config", (ConfigService c) => Results.Ok(c.Load()));
-        app.MapPost("/api/alerts/{key}/suppress", async (string key, StateService s, HttpContext http, IAntiforgery antiforgery) =>
-        {
-            if (!await antiforgery.IsRequestValidAsync(http))
-                return Results.BadRequest();
-            return s.Suppress(key) ? Results.Ok() : Results.NotFound();
-        });
-        app.MapDelete("/api/alerts/{key}/suppress", async (string key, StateService s, HttpContext http, IAntiforgery antiforgery) =>
-        {
-            if (!await antiforgery.IsRequestValidAsync(http))
-                return Results.BadRequest();
-            return s.Unsuppress(key) ? Results.Ok() : Results.NotFound();
-        });
+        // Suppress and unsuppress live only in the Blazor circuit (Alerts, Captures)
+        // and the `captures suppress` CLI. Do not add a state-changing minimal API
+        // here: UseAntiforgery does not reject a route that binds no form, so it
+        // would be open to cross-site POSTs on the default loopback launch.
 
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
         return app;

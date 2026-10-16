@@ -26,7 +26,7 @@ Preconditions:
 - **Search.** Type into the box labeled **Search**. Its placeholder is `resource or message`. Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser fill --label Search --value repo`. Matching is against the resource and the message, and it updates as the operator types.
 - **Severity and server.** The **Severity** and **Server** dropdowns are labeled selects. **Server** only lists names present on findings or captured errors. Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser select --label Severity --value warning`.
 - **Suppress.** On a row, choose **Suppress** plus the resource name, for example **Suppress repo-disk**. Success flashes `Suppressed repo-disk`, and the button becomes **Unsuppress repo-disk**. The finding does not have to exist under `captured_errors`. Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser click --role button --name "Suppress repo-disk"` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser wait-text "Suppressed repo-disk"`.
-- **Confirm the side effect.** Reload `/alerts`. The row stays suppressed. The state file in the data directory has the key under `suppressions`. Do not call `POST /api/alerts/{key}/suppress`.
+- **Confirm the side effect.** Reload `/alerts`. The row stays suppressed. The state file in the data directory has the key under `suppressions`.
 - **Proof.** Run `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser screenshot --path "$EVIDENCE/alerts/list.png"` and `.claude/skills/verify-veeam-vhc-aws/scripts/vhc-verify browser snapshot --path "$EVIDENCE/alerts/list.aria.txt"`.
 
 ## Gotchas

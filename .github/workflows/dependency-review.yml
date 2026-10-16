@@ -1,0 +1,26 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [dev, master]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Fails a PR that adds or changes a dependency with a high or critical
+      # advisory. Only dependencies the PR touches are checked, so advisories
+      # already on dev do not block unrelated PRs.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # GHSA-24c8-4792-22hx (high): Scriban.Signed, pulled in only by
+          # WireMock.Net in tests/VeeamVhcAws.Tests. It never ships in the
+          # published exe. Drop this once a WireMock.Net release moves past it.
+          allow-ghsas: GHSA-24c8-4792-22hx
