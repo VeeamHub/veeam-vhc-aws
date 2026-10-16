@@ -1,4 +1,6 @@
 using Spectre.Console;
+using VeeamVhcAws.Core.Config;
+using VeeamVhcAws.Scheduling;
 
 namespace VeeamVhcAws.Ui;
 
@@ -85,7 +87,7 @@ public static class SetupWizard
                 new TextPrompt<string>("Password:")
                     .Secret());
 
-            var verifySsl = AnsiConsole.Confirm("Verify SSL certificate?", false);
+            var verifySsl = AnsiConsole.Confirm("Verify SSL certificate?", true);
 
             servers.Add(new WizardServer
             {
@@ -205,6 +207,11 @@ public static class SetupWizard
         answers.SessionLookbackHours = AnsiConsole.Ask("Session lookback (hours):", 24);
 
         AnsiConsole.WriteLine();
+        answers.DailySummaryEnabled = AnsiConsole.Confirm("Enable the daily health summary?", true);
+        if (answers.DailySummaryEnabled)
+            answers.DailySummaryTime = AnsiConsole.Ask("Daily summary time (HH:mm)", DailySummaryTaskSync.DefaultTime);
+
+        AnsiConsole.WriteLine();
     }
 
     private static void RunStep7_Review(WizardAnswers answers, string outputPath)
@@ -228,6 +235,7 @@ public static class SetupWizard
         table.AddRow("Overage multiplier", answers.OverageMultiplier.ToString("F1"));
         table.AddRow("Orphan detection", answers.OrphanDetection ? "Enabled" : "Disabled");
         table.AddRow("Session lookback", $"{answers.SessionLookbackHours}h");
+        table.AddRow("Daily summary", answers.DailySummaryEnabled ? $"Enabled at {answers.DailySummaryTime}" : "Disabled");
         table.AddRow("Output path", outputPath);
 
         AnsiConsole.Write(table);
@@ -239,19 +247,25 @@ public static class SetupWizard
             return;
         }
 
-        // Build config and write
-        var config = ConfigBuilder.Build(answers);
-        var yaml = ConfigBuilder.ToYaml(config);
-
-        var dir = Path.GetDirectoryName(outputPath);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-
-        File.WriteAllText(outputPath, yaml);
-
-        var fullPath = Path.GetFullPath(outputPath);
+        var fullPath = SaveConfig(answers, outputPath);
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine($"[green]Configuration saved to:[/] {fullPath.EscapeMarkup()}");
+        try
+        {
+            var outcome = DailySummaryTaskSync.Apply(
+                answers.DailySummaryEnabled,
+                DailySummaryTasks.CreateDefault(),
+                fullPath,
+                answers.DailySummaryTime);
+            if (outcome == "registered")
+                AnsiConsole.MarkupLine("[green]Daily summary task registered.[/]");
+            else if (outcome == "unregistered")
+                AnsiConsole.MarkupLine("[grey]Daily summary task removed.[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[yellow]Daily summary task was not updated:[/] {ex.Message.EscapeMarkup()}");
+        }
         AnsiConsole.WriteLine();
 
         // Next steps
@@ -266,5 +280,25 @@ public static class SetupWizard
         AnsiConsole.MarkupLine("  [bold]3.[/] Schedule automated monitoring:");
         AnsiConsole.MarkupLine($"       [cyan]veeam-vhc-aws setup --help[/] for scheduling instructions");
         AnsiConsole.WriteLine();
+    }
+
+    /// <summary>
+    /// Build the config from the wizard answers and write it to outputPath. Returns the full path.
+    /// </summary>
+    internal static string SaveConfig(WizardAnswers answers, string outputPath)
+    {
+        // Seal passwords with <config dir>/.veeam-vhc-aws.key, the key every later command
+        // binds with -c. Unbound, the store falls back to ~/.vhc/secret.key (ProgramData on
+        // Windows) and the saved passwords cannot be opened.
+        SecretKeyStore.BindProcessDirectory(outputPath);
+        var config = ConfigBuilder.Build(answers);
+        var yaml = ConfigBuilder.ToYaml(config);
+
+        var dir = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+
+        File.WriteAllText(outputPath, yaml);
+        return Path.GetFullPath(outputPath);
     }
 }

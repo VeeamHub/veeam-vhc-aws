@@ -22,15 +22,17 @@ public static class CommandHelpers
         LoadAndSetup(string? configArg)
     {
         var configPath = ConfigLoader.GetConfigPath(configArg);
+        SecretKeyStore.BindProcessDirectory(configPath);
         var config = ConfigLoader.LoadConfig(configPath);
-        LoggingSetup.Setup(config);
+        LoggingSetup.Setup(config, configPath);
         Logger.Information("veeam-vhc-aws starting (PID {ProcessId})", Environment.ProcessId);
 
         var servers = ServerContextBuilder.BuildAllServers(config);
         var patternEngine = BuildPatternEngine(config);
-        var handlers = OutputHandlerFactory.CreateHandlers(config);
+        var handlers = OutputHandlerFactory.CreateHandlers(config, configPath);
         var dispatcher = new OutputDispatcher(handlers);
-        var stateFile = Path.GetFullPath(config.GetSection("global").Get("state_file", "./veeam-vhc-aws-state.json"));
+        var stateFile = ConfigLoader.AnchorPath(configPath,
+            config.GetSection("global").Get("state_file", "./veeam-vhc-aws-state.json"));
         var configSuppressions = config.GetListOfStrings("suppressions");
         var state = new FindingState(stateFile, configSuppressions);
 
@@ -79,6 +81,8 @@ public static class CommandHelpers
             if (code > worst) worst = code;
             foreach (var finding in result.Findings)
             {
+                if (FindingState.IsSuppressed(finding))
+                    continue;
                 code = finding.Severity.ToExitCode();
                 if (code > worst) worst = code;
             }

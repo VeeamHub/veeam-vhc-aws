@@ -1,24 +1,20 @@
 using System.CommandLine;
-using System.Text.RegularExpressions;
 using VeeamVhcAws.Core.Config;
 
 namespace VeeamVhcAws.Commands;
 
 public static class EncryptConfigCommand
 {
-    internal static readonly Regex PasswordLineRegex = new(
-        @"^(\s*(?:smtp_)?password:\s*)(?![ \t]*""?ENC:)""?([^""#\n]+?)""?\s*$",
-        RegexOptions.Compiled);
-
     public static Command Create()
     {
-        var command = new Command("encrypt-config", "Obfuscate plaintext passwords in config file in-place");
-        var configOption = new Option<string?>("--config", "Path to config file (default: same as other commands)");
+        var command = new Command("encrypt-config", "Protect plaintext and legacy ENC passwords in a config file");
+        var configOption = CommandHelpers.ConfigOption();
         command.AddOption(configOption);
 
         command.SetHandler((string? configArg) =>
         {
             var path = ConfigLoader.GetConfigPath(configArg);
+            SecretKeyStore.BindThreadDirectory(path);
 
             if (!File.Exists(path))
             {
@@ -27,33 +23,19 @@ public static class EncryptConfigCommand
             }
 
             var lines = File.ReadAllLines(path);
-            var count = 0;
-
-            for (var i = 0; i < lines.Length; i++)
+            var count = ConfigSecrets.ProtectLines(lines);
+            var emailEdits = LegacyEmailKeys.MigrateLines(lines);
+            if (count == 0 && emailEdits == 0)
             {
-                var match = PasswordLineRegex.Match(lines[i]);
-                if (!match.Success)
-                    continue;
-
-                var prefix = match.Groups[1].Value;
-                var plaintext = match.Groups[2].Value.Trim();
-
-                if (string.IsNullOrEmpty(plaintext))
-                    continue;
-
-                var obfuscated = PasswordObfuscator.Obfuscate(plaintext);
-                lines[i] = $"{prefix}\"{obfuscated}\"";
-                count++;
-            }
-
-            if (count == 0)
-            {
-                Console.WriteLine("No plaintext passwords found.");
+                Console.WriteLine("No plaintext or legacy secrets found.");
                 return;
             }
 
             File.WriteAllLines(path, lines);
-            Console.WriteLine($"Obfuscated {count} password(s) in {path}");
+            if (count > 0)
+                Console.WriteLine($"Protected {count} secret(s) in {path}");
+            if (emailEdits > 0)
+                Console.WriteLine($"Migrated {emailEdits} legacy email key(s) in {path}");
         }, configOption);
 
         return command;

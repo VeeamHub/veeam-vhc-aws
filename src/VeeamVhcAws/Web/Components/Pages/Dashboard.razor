@@ -7,6 +7,7 @@
 <PageTitle>Dashboard — Veeam VHC AWS</PageTitle>
 
 <h1>Dashboard</h1>
+<p class="muted">Overall health of every monitored server. The scheduled task updates it on every run.</p>
 
 @if (_state is null || _cfg is null)
 {
@@ -17,15 +18,46 @@ else
     var crit = _state.ActiveFindings.Count(a => a.Severity == "critical");
     var warn = _state.ActiveFindings.Count(a => a.Severity == "warning");
     var err  = _state.ActiveFindings.Count(a => a.Severity == "error");
-    var ok   = err == 0 && crit == 0 && warn == 0;
+    var hasRun = _state.LastRun is not null;
+    var clear = err == 0 && crit == 0 && warn == 0;
+    var pending = !hasRun && clear;
 
     var serversClass  = "card-neutral";
-    var findingsClass = FindingsCardClass(crit, warn, err);
+    var findingsClass = FindingsCardClass(crit, warn, err, hasRun);
     var errorsClass   = ErrorsCardClass(_state.CapturedErrors);
     var lastRunClass  = LastRunCardClass(_state.LastRun);
 
-    <section class="status-banner @(ok ? "ok" : "alert")">
-        @if (ok)
+    var steps = GettingStarted.Evaluate(_cfg, _state);
+    var nextIndex = steps.ToList().FindIndex(x => !x.Done);
+    if (nextIndex >= 0)
+    {
+        <section class="card getting-started" aria-labelledby="getting-started-title">
+            <div class="getting-started-head">
+                <h2 id="getting-started-title">Getting started</h2>
+                <a href="help">Read the guide</a>
+            </div>
+            <ol class="checklist">
+                @for (var i = 0; i < steps.Count; i++)
+                {
+                    var step = steps[i];
+                    <li class="@(step.Done ? "done" : i == nextIndex ? "next" : "")">
+                        <span class="check" aria-hidden="true">@(step.Done ? "✓" : "○")</span>
+                        <div>
+                            <strong>@step.Title</strong>@(step.Done ? " (done)" : i == nextIndex ? " (next)" : "")
+                            <p class="muted">@step.HowTo <a href="@step.Href">@step.LinkText</a></p>
+                        </div>
+                    </li>
+                }
+            </ol>
+        </section>
+    }
+
+    <section class="status-banner @(pending ? "pending" : clear ? "ok" : "alert")">
+        @if (pending)
+        {
+            <strong>[--]</strong> <span>No runs yet — @_cfg.Servers.Count server(s) configured</span>
+        }
+        else if (clear)
         {
             <strong>[OK]</strong> <span>All monitors clear — @_cfg.Servers.Count server(s), 0 findings</span>
         }
@@ -114,11 +146,11 @@ else
 
     public void Dispose() => _autoRefresh?.Dispose();
 
-    private static string FindingsCardClass(int crit, int warn, int err)
+    private static string FindingsCardClass(int crit, int warn, int err, bool hasRun)
     {
         if (crit > 0) return "card-crit";
         if (warn > 0 || err > 0) return "card-warn";
-        return "card-ok";
+        return hasRun ? "card-ok" : "card-neutral";
     }
 
     private static string ErrorsCardClass(IReadOnlyList<AlertView> errors)
@@ -127,8 +159,9 @@ else
         return errors.Any(a => !a.Suppressed) ? "card-warn" : "card-ok";
     }
 
-    private static string LastRunCardClass(DateTime? lastRun) =>
-        lastRun is null || (DateTime.UtcNow - lastRun.Value).TotalHours > 1
-            ? "card-warn"
-            : "card-ok";
+    private static string LastRunCardClass(DateTime? lastRun)
+    {
+        if (lastRun is null) return "card-neutral";
+        return (DateTime.UtcNow - lastRun.Value).TotalHours > 1 ? "card-warn" : "card-ok";
+    }
 }

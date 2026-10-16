@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using MailKit.Net.Smtp;
 using MimeKit;
@@ -9,7 +10,7 @@ namespace VeeamVhcAws.Outputs;
 
 public class EmailHandler : IOutputHandler
 {
-    private static readonly ILogger Logger = Log.ForContext<EmailHandler>();
+    private static ILogger Logger => Log.ForContext<EmailHandler>();
 
     private static readonly Dictionary<Severity, string> SeverityColors = new()
     {
@@ -27,11 +28,13 @@ public class EmailHandler : IOutputHandler
     private readonly string _smtpUsername;
     private readonly string _smtpPassword;
     private readonly bool _useTls;
+    private readonly bool _deduplicate;
 
     public EmailHandler(string smtpHost, int smtpPort = 587,
         string fromAddr = "", List<string>? toAddrs = null,
         string minSeverity = "critical",
-        string smtpUsername = "", string smtpPassword = "", bool useTls = true)
+        string smtpUsername = "", string smtpPassword = "", bool useTls = true,
+        bool deduplicate = true)
     {
         _smtpHost = smtpHost;
         _smtpPort = smtpPort;
@@ -41,6 +44,7 @@ public class EmailHandler : IOutputHandler
         _smtpUsername = smtpUsername;
         _smtpPassword = smtpPassword;
         _useTls = useTls;
+        _deduplicate = deduplicate;
     }
 
     private bool ShouldSend(IReadOnlyList<MonitorResult> results)
@@ -74,7 +78,7 @@ public class EmailHandler : IOutputHandler
                 findingHtml.Append(
                     $"<li><span style=\"color:{fColor};font-weight:bold;\">" +
                     $"[{f.Severity.ToLowerString().ToUpperInvariant()}]</span> " +
-                    $"<strong>{f.Resource}</strong>: {BoldWorkloadsHtml(f.Message)}</li>");
+                    $"<strong>{WebUtility.HtmlEncode(f.Resource)}</strong>: {BoldWorkloadsHtml(WebUtility.HtmlEncode(f.Message))}</li>");
             }
 
             rows.Append($@"
@@ -130,7 +134,8 @@ public class EmailHandler : IOutputHandler
     /// Decides whether an email should be sent for these results.
     /// A daily summary (Metadata["summary"] == true) always sends — even when everything is
     /// healthy — because an "all clear" report is the point of a daily summary. Alert (non-summary)
-    /// runs are gated by both the minimum-severity threshold and the presence of findings/errors.
+    /// runs are gated by the minimum-severity threshold, the presence of findings/errors, and (unless
+    /// deduplicate is false) by having a new or resolved finding.
     /// </summary>
     public bool ShouldEmit(IReadOnlyList<MonitorResult> results, out string? skipReason)
     {
@@ -152,6 +157,12 @@ public class EmailHandler : IOutputHandler
             return false;
         }
 
+        if (!isSummary && _deduplicate && !results.HasNewOrResolvedFindings())
+        {
+            skipReason = "no new or resolved findings (dedup)";
+            return false;
+        }
+
         skipReason = null;
         return true;
     }
@@ -167,17 +178,17 @@ public class EmailHandler : IOutputHandler
         var isSummary = results.IsSummary();
         var html = BuildHtml(results);
 
-        var message = new MimeMessage();
-        message.From.Add(MailboxAddress.Parse(_fromAddr));
-        foreach (var addr in _toAddrs)
-            message.To.Add(MailboxAddress.Parse(addr));
-        message.Subject = isSummary ? "Daily Veeam VHC AWS Summary" : "Veeam VHC AWS Alert";
-
-        var bodyBuilder = new BodyBuilder { HtmlBody = html };
-        message.Body = bodyBuilder.ToMessageBody();
-
         try
         {
+            var message = new MimeMessage();
+            message.From.Add(MailboxAddress.Parse(_fromAddr));
+            foreach (var addr in _toAddrs)
+                message.To.Add(MailboxAddress.Parse(addr));
+            message.Subject = isSummary ? "Daily Veeam VHC AWS Summary" : "Veeam VHC AWS Alert";
+
+            var bodyBuilder = new BodyBuilder { HtmlBody = html };
+            message.Body = bodyBuilder.ToMessageBody();
+
             using var client = new SmtpClient();
             client.Connect(_smtpHost, _smtpPort, _useTls ? MailKit.Security.SecureSocketOptions.StartTls : MailKit.Security.SecureSocketOptions.None);
             if (!string.IsNullOrEmpty(_smtpUsername))

@@ -14,19 +14,23 @@ public static class ServeCommand
         var configOption = CommandHelpers.ConfigOption();
         var portOption = new Option<int>(new[] { "--port", "-p" }, () => 9100, "Prometheus HTTP server port");
         var intervalOption = new Option<int>(new[] { "--interval", "-i" }, () => 300, "Scrape interval in seconds");
+        var bindOption = new Option<string>(
+            "--bind",
+            () => "127.0.0.1",
+            "Listen address. Defaults to 127.0.0.1. Set this to bind a non-loopback address.");
 
         command.AddOption(configOption);
         command.AddOption(portOption);
         command.AddOption(intervalOption);
+        command.AddOption(bindOption);
 
-        command.SetHandler((string? config, int port, int interval) =>
+        command.SetHandler((string? config, int port, int interval, string bind) =>
         {
             var (cfg, servers, pe, dispatcher, state) = CommandHelpers.LoadAndSetup(config);
 
-            // Start Prometheus metrics server
-            var metricServer = new Prometheus.MetricServer(port: port);
+            var metricServer = new Prometheus.MetricServer(hostname: bind, port: port);
             metricServer.Start();
-            Console.WriteLine($"Starting Prometheus HTTP server on port {port}");
+            Console.WriteLine($"Starting Prometheus HTTP server on {bind}:{port}");
             Console.WriteLine($"Monitoring {servers.Count} servers every {interval}s. Press Ctrl+C to stop.");
 
             while (true)
@@ -49,7 +53,7 @@ public static class ServeCommand
                 var sleepMs = Math.Max(0, (int)((interval - cycleDuration) * 1000));
                 Thread.Sleep(sleepMs);
             }
-        }, configOption, portOption, intervalOption);
+        }, configOption, portOption, intervalOption, bindOption);
 
         return command;
     }

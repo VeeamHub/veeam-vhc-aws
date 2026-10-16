@@ -19,11 +19,12 @@ public class VbrClient : IVbrClient
     private readonly string _apiVersion;
     private readonly int _pageSize;
     private readonly int _maxPages;
+    private readonly HttpClient _http;
 
     public VbrClient(string baseUrl, VbrAuth auth, bool verifySsl = true,
         int timeout = 30, int retryCount = 2, int retryDelay = 5,
         string apiVersion = "1.3-rev1", int pageSize = 500, int maxPages = 100,
-        int sessionTimeout = 600)
+        int sessionTimeout = 600, HttpMessageHandler? handler = null)
     {
         _baseUrl = baseUrl.TrimEnd('/');
         _auth = auth;
@@ -35,18 +36,17 @@ public class VbrClient : IVbrClient
         _apiVersion = apiVersion;
         _pageSize = pageSize;
         _maxPages = maxPages;
+        _http = new HttpClient(handler ?? CreateHandler()) { Timeout = Timeout.InfiniteTimeSpan };
+        _auth.BindClient(_http);
     }
 
-    private HttpClient CreateClient() => CreateClientWithTimeout(_timeout);
-
-    private HttpClient CreateClientWithTimeout(int timeoutSeconds)
+    private HttpMessageHandler CreateHandler()
     {
         var handler = new HttpClientHandler();
         if (!_verifySsl)
             handler.ServerCertificateCustomValidationCallback =
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-
-        return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
+        return handler;
     }
 
     private Dictionary<string, object> Request(string method, string path,
@@ -62,15 +62,13 @@ public class VbrClient : IVbrClient
         }
 
         Exception? lastError = null;
+        var refreshed = false;
         for (int attempt = 0; attempt <= _retryCount; attempt++)
         {
             var sw = Stopwatch.StartNew();
             try
             {
                 var headers = _auth.GetHeaders();
-                using var client = timeoutSeconds.HasValue
-                    ? CreateClientWithTimeout(timeoutSeconds.Value)
-                    : CreateClient();
                 var request = new HttpRequestMessage(new HttpMethod(method), url);
                 foreach (var (key, value) in headers)
                     request.Headers.TryAddWithoutValidation(key, value);
@@ -82,10 +80,28 @@ public class VbrClient : IVbrClient
                     request.Content = new StringContent(bodyJson, System.Text.Encoding.UTF8, "application/json");
                 }
 
-                var response = client.SendAsync(request).GetAwaiter().GetResult();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds ?? _timeout));
+                using var response = _http.SendAsync(request, timeout.Token).GetAwaiter().GetResult();
                 var durationMs = sw.ElapsedMilliseconds;
                 Logger.Debug("VBR {Method} {Path} -> {StatusCode} ({Duration}ms)",
                     method, path, (int)response.StatusCode, durationMs);
+
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    if (!refreshed)
+                    {
+                        refreshed = true;
+                        _auth.Invalidate();
+                        attempt--;
+                        continue;
+                    }
+
+                    lastError = new HttpRequestException(
+                        "VBR request unauthorized after token refresh.",
+                        null,
+                        HttpStatusCode.Unauthorized);
+                    break;
+                }
 
                 response.EnsureSuccessStatusCode();
 
@@ -253,8 +269,16 @@ public class VbrClient : IVbrClient
             }
             catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.InternalServerError)
             {
+                if (pages >= _maxPages)
+                {
+                    Logger.Warning("Backups pagination circuit breaker: stopped after {Pages} pages ({Count} backups)",
+                        _maxPages, allBackups.Count);
+                    break;
+                }
+
                 Logger.Warning("VBR /api/v1/backups batch failed at offset {Offset} — falling back to per-item fetch", offset);
                 bool endReached = false;
+                int fetched = 0;
                 for (int i = 0; i < _pageSize; i++)
                 {
                     try
@@ -272,6 +296,7 @@ public class VbrClient : IVbrClient
                             break;
                         }
                         allBackups.AddRange(page);
+                        fetched += page.Count;
                     }
                     catch (HttpRequestException)
                     {
@@ -281,6 +306,17 @@ public class VbrClient : IVbrClient
                 }
                 pages++;
                 if (endReached) break;
+                if (fetched == 0)
+                {
+                    Logger.Warning("Backups fallback page at offset {Offset} returned no items — stopping", offset);
+                    break;
+                }
+                if (pages >= _maxPages)
+                {
+                    Logger.Warning("Backups pagination circuit breaker: stopped after {Pages} pages ({Count} backups)",
+                        _maxPages, allBackups.Count);
+                    break;
+                }
                 offset += _pageSize;
             }
         }
@@ -301,17 +337,6 @@ public class VbrClient : IVbrClient
                 ["skip"] = offset.ToString()
             });
         return ExtractDataList(result);
-    }
-
-    public List<Dictionary<string, object>> RescanRepositories(List<string> repoIds)
-    {
-        var results = new List<Dictionary<string, object>>();
-        foreach (var repoId in repoIds)
-        {
-            var result = Request("POST", $"/api/v1/backupInfrastructure/repositories/{repoId}/rescan");
-            results.Add(result);
-        }
-        return results;
     }
 
     public Dictionary<string, object> GetServerInfo()

@@ -81,6 +81,8 @@ New-Item -ItemType Directory -Path $tmpDir | Out-Null
 Copy-Item $ExePath                $tmpDir
 Copy-Item $WwwRootPath            $tmpDir -Recurse   # Blazor admin UI static assets (required by `ui`)
 Copy-Item "setup.ps1"             $tmpDir
+New-Item -ItemType Directory -Path (Join-Path $tmpDir "scripts") | Out-Null
+Copy-Item "scripts\vhc-tasks.ps1" (Join-Path $tmpDir "scripts")
 Copy-Item "config\example.yaml"   $tmpDir
 
 @"

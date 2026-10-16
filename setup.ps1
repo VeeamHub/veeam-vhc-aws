@@ -8,7 +8,7 @@ param(
     [string]$AlertUrl,
 
     [Parameter(Mandatory=$false)]
-    [int]$IntervalMinutes = 60,
+    [int]$IntervalMinutes = 5,
 
     [Parameter(Mandatory=$false)]
     [string]$InstallDir = "$env:ProgramFiles\VHC",
@@ -23,7 +23,13 @@ param(
     [string]$SummaryTime = "",
 
     [Parameter(Mandatory=$false)]
-    [switch]$NoSummary
+    [switch]$NoSummary,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$NoShortcut,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$DesktopShortcut
 )
 
 # --- Require PowerShell 7+ ---
@@ -41,6 +47,97 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($NoShortcut -and $DesktopShortcut) {
+    Write-Host "ERROR: -NoShortcut and -DesktopShortcut cannot be used together." -ForegroundColor Red
+    exit 1
+}
+
+# --- Admin UI shortcut helpers ---
+# The shortcut starts the web admin UI elevated (the data directory is locked to
+# SYSTEM + Administrators). Its arguments never carry --bind or any auth override,
+# so the UI keeps its secure default of 127.0.0.1 only.
+
+function Get-VhcShortcutPaths {
+    return [pscustomobject]@{
+        StartMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\VHC AWS Admin.lnk"
+        Desktop   = Join-Path $env:PUBLIC "Desktop\VHC AWS Admin.lnk"
+    }
+}
+
+function Get-VhcShortcutArguments {
+    param([Parameter(Mandatory=$true)][string]$ConfigPath)
+    return "ui -c `"$ConfigPath`""
+}
+
+# Sets the "Run as administrator" flag (SLDF_RUNAS_USER, 0x20) in the .lnk header
+# byte at offset 0x15. Pure function over a byte array so it is testable off-Windows.
+function Set-LnkRunAsAdministrator {
+    param([Parameter(Mandatory=$true)][byte[]]$Bytes)
+    if ($Bytes.Length -le 0x15) {
+        throw "Shortcut data is too short ($($Bytes.Length) bytes) to be a .lnk file."
+    }
+    $patched = [byte[]]$Bytes.Clone()
+    $patched[0x15] = [byte]($patched[0x15] -bor 0x20)
+    return ,$patched
+}
+
+# Creates one shortcut via WScript.Shell. Returns $true on success; on any failure
+# prints a yellow warning with the CLI fallback and returns $false (never throws).
+function New-VhcAdminShortcut {
+    param(
+        [Parameter(Mandatory=$true)][string]$ShortcutPath,
+        [Parameter(Mandatory=$true)][string]$ExePath,
+        [Parameter(Mandatory=$true)][string]$ConfigPath,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectory
+    )
+    try {
+        $parent = Split-Path -Parent $ShortcutPath
+        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+
+        $shell = New-Object -ComObject WScript.Shell
+        $link = $shell.CreateShortcut($ShortcutPath)
+        $link.TargetPath = $ExePath
+        $link.Arguments = Get-VhcShortcutArguments -ConfigPath $ConfigPath
+        $link.WorkingDirectory = $WorkingDirectory
+        $link.Description = "Open the Veeam VHC AWS web admin UI (runs as administrator)"
+        $link.WindowStyle = 1
+        $link.IconLocation = "$ExePath,0"
+        $link.Save()
+
+        $patched = Set-LnkRunAsAdministrator -Bytes ([IO.File]::ReadAllBytes($ShortcutPath))
+        [IO.File]::WriteAllBytes($ShortcutPath, $patched)
+        return $true
+    } catch {
+        Write-Host "  -> WARNING: Could not create shortcut '$ShortcutPath': $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  -> Start the admin UI from an elevated shell instead:" -ForegroundColor Yellow
+        Write-Host "       & '$ExePath' ui -c '$ConfigPath'" -ForegroundColor Yellow
+        return $false
+    }
+}
+
+# Creates/refreshes the Start Menu shortcut (and the Desktop one with -DesktopShortcut).
+# Returns $true only when every requested shortcut was created.
+function Install-VhcAdminShortcuts {
+    param(
+        [Parameter(Mandatory=$true)][string]$ExePath,
+        [Parameter(Mandatory=$true)][string]$ConfigPath,
+        [Parameter(Mandatory=$true)][string]$WorkingDirectory,
+        [bool]$IncludeDesktop = $false
+    )
+    $paths = Get-VhcShortcutPaths
+    $targets = @($paths.StartMenu)
+    if ($IncludeDesktop) { $targets += $paths.Desktop }
+    $allOk = $true
+    foreach ($target in $targets) {
+        if (New-VhcAdminShortcut -ShortcutPath $target -ExePath $ExePath -ConfigPath $ConfigPath -WorkingDirectory $WorkingDirectory) {
+            Write-Host "  -> Shortcut: $target" -ForegroundColor Green
+        } else {
+            $allOk = $false
+        }
+    }
+    return $allOk
+}
 
 function ConvertTo-ObfuscatedPassword {
     param([string]$Plaintext)
@@ -105,6 +202,14 @@ if ($Uninstall) {
     if (Test-Path $wwwPath) {
         Remove-Item $wwwPath -Recurse -Force
         Write-Host "  -> Removed $wwwPath" -ForegroundColor Green
+    }
+
+    $shortcutPaths = Get-VhcShortcutPaths
+    foreach ($lnk in @($shortcutPaths.StartMenu, $shortcutPaths.Desktop)) {
+        if (Test-Path $lnk) {
+            Remove-Item $lnk -Force
+            Write-Host "  -> Removed shortcut $lnk" -ForegroundColor Green
+        }
     }
 
     $dataDir = Join-Path $env:ProgramData "VHC"
@@ -242,34 +347,10 @@ if ($Upgrade) {
                 Save-Config $configText
                 Write-Host "  -> daily_summary added to config" -ForegroundColor Green
 
-                # Create the scheduled task
-                $dsTaskName = "Veeam VHC AWS Daily Summary"
-                $dsAction = New-ScheduledTaskAction `
-                    -Execute $exeDest `
-                    -Argument "summary --config `"$configPath`"" `
-                    -WorkingDirectory $InstallDir
-                try {
-                    $dsTrigger = New-ScheduledTaskTrigger -Daily -At $dsTime
-                } catch {
-                    Write-Host "  WARNING: Invalid time '$dsTime', defaulting to 08:00" -ForegroundColor Yellow
-                    $dsTime = "08:00"
-                    $dsTrigger = New-ScheduledTaskTrigger -Daily -At $dsTime
-                }
-                $dsSettings = New-ScheduledTaskSettingsSet `
-                    -StartWhenAvailable -DontStopOnIdleEnd `
-                    -ExecutionTimeLimit (New-TimeSpan -Hours 6)
-                $dsPrincipal = New-ScheduledTaskPrincipal `
-                    -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-
-                if (Get-ScheduledTask -TaskName $dsTaskName -ErrorAction SilentlyContinue) {
-                    Unregister-ScheduledTask -TaskName $dsTaskName -Confirm:$false
-                }
-                Register-ScheduledTask `
-                    -TaskName $dsTaskName -Action $dsAction -Trigger $dsTrigger `
-                    -Settings $dsSettings -Principal $dsPrincipal `
-                    -Description "Daily Veeam VHC AWS health summary at $dsTime" | Out-Null
-
-                Write-Host "  -> Scheduled task '$dsTaskName' created (daily at $dsTime)" -ForegroundColor Green
+                $taskScript = Join-Path $PSScriptRoot "scripts\vhc-tasks.ps1"
+                & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
+                & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeDest -ConfigPath $configPath -Time $dsTime -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
+                Write-Host "  -> Scheduled task 'Veeam VHC AWS Daily Summary' created (daily at $dsTime)" -ForegroundColor Green
                 $anyUpdates = $true
             } else {
                 Write-Host "  -> Skipped. Enable later by adding 'daily_summary:' to $configPath" -ForegroundColor DarkGray
@@ -340,12 +421,8 @@ if ($Upgrade) {
             $logChoice = Read-Host "  Migrate logs to VHC\logs\ subfolder? (y/n) [y]"
             if ($logChoice -ne "n") {
                 $logDir = Join-Path $dataDir "logs"
-                if (-not (Test-Path $logDir)) {
-                    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-                    icacls $logDir /grant "Users:(OI)(CI)M" 2>$null | Out-Null
-                }
-                # Update the config file path
-                $configText = $configText -replace '(file:\s*")[^"]*\\VHC\\(veeam-vhc-aws)', "`$1$($dataDir -replace '\\', '\\')\\logs\\`$2"
+                Protect-VhcSystemDirectory $logDir
+                $configText = Set-LoggingPathToVhcLogs $configText $dataDir
                 Save-Config $configText
                 # Move existing log files
                 $existingLogs = Get-ChildItem -Path $dataDir -Filter "veeam-vhc-aws*.log" -ErrorAction SilentlyContinue
@@ -389,6 +466,15 @@ if ($Upgrade) {
             if ($configText -match 'page_size') {
                 Write-Host "  API performance tuning: already configured" -ForegroundColor DarkGray
             }
+        }
+
+        # ---- Feature: data_directory ----
+        if ($configText -match '(?m)^global:' -and $configText -notmatch '(?m)^\s*data_directory:') {
+            $dataDirYaml = $dataDir -replace '\\', '/'
+            $configText = Insert-ConfigBlock $configText "global" "  data_directory: '$dataDirYaml'"
+            Save-Config $configText
+            Write-Host "  data_directory: added ($dataDir)" -ForegroundColor DarkGray
+            $anyUpdates = $true
         }
 
         # ---- Feature: session_timeout_seconds ----
@@ -440,6 +526,12 @@ if ($Upgrade) {
         Write-Host "  Run setup.ps1 without -Upgrade to do a fresh install." -ForegroundColor Yellow
     }
 
+    # Create/refresh the admin UI shortcut(s) so they track the new exe
+    $upgradeShortcutOk = $true
+    if (-not $NoShortcut) {
+        $upgradeShortcutOk = Install-VhcAdminShortcuts -ExePath $exeDest -ConfigPath $configPath -WorkingDirectory $InstallDir -IncludeDesktop ([bool]$DesktopShortcut)
+    }
+
     # Re-enable tasks after upgrade
     foreach ($tn in $taskNames) {
         Enable-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue | Out-Null
@@ -453,6 +545,10 @@ if ($Upgrade) {
     }
     Write-Host "Scheduled task will use the new version on its next run." -ForegroundColor Green
     Write-Host "Manual run: & '$exeDest' all --config '$configPath'" -ForegroundColor Cyan
+    if (-not $NoShortcut -and $upgradeShortcutOk) {
+        Write-Host "Admin UI:   Start Menu -> VHC AWS Admin" -ForegroundColor Cyan
+    }
+    Write-Host "Admin UI (CLI, elevated shell): & '$exeDest' ui -c '$configPath'" -ForegroundColor Cyan
     Write-Host ""
     exit 0
 }
@@ -519,6 +615,34 @@ try {
     Write-Host "     Run:  Add-MpPreference -ExclusionPath '$exeDest'" -ForegroundColor Yellow
 }
 
+function Set-LoggingPathToVhcLogs {
+    param(
+        [Parameter(Mandatory)][string]$ConfigText,
+        [Parameter(Mandatory)][string]$DataDir
+    )
+    $forward = (($DataDir -replace '\\', '/') + '/logs/veeam-vhc-aws.log')
+    return ($ConfigText -replace '(?m)^(\s*)file:\s*[''"][^''"]*[/\\]VHC[/\\]veeam-vhc-aws[^''"]*[''"]', "`${1}file: '$forward'")
+}
+
+function Protect-VhcSystemDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+    icacls $Path /inheritance:r | Out-Null
+    icacls $Path /grant:r "NT AUTHORITY\SYSTEM:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" | Out-Null
+}
+
+function Read-VerifySslChoice {
+    param([string]$ProductName)
+    $answer = Read-Host "  Verify the TLS certificate for $ProductName? (y/n) [y]"
+    if ($answer -match '^[nN]') {
+        Write-Host "  WARNING: TLS verification is off. An on-path attacker can collect the $ProductName password." -ForegroundColor Red
+        return $false
+    }
+    return $true
+}
+
 # --- 2. Generate config from user input ---
 Write-Host ""
 Write-Host "[2/5] Configuring monitoring targets" -ForegroundColor Yellow
@@ -537,13 +661,15 @@ if ($vbrUrl) {
     # Escape backslashes for YAML double-quoted strings (e.g. DOMAIN\user -> DOMAIN\\user)
     $vbrUserYaml = $vbrUser -replace '\\', '\\'
     $vbrPassYaml = ConvertTo-ObfuscatedPassword $vbrPassPlain
+    $vbrVerifySsl = Read-VerifySslChoice "VBR"
+    $verifySslYaml = $vbrVerifySsl.ToString().ToLower()
     $vbrBlock = @"
   - name: vbr
     type: vbr
     url: $vbrUrl
     username: "$vbrUserYaml"
     password: "$vbrPassYaml"
-    verify_ssl: false
+    verify_ssl: $verifySslYaml
 "@
 }
 
@@ -559,13 +685,15 @@ if ($vbawsUrl) {
     # Escape backslashes for YAML double-quoted strings
     $vbawsUserYaml = $vbawsUser -replace '\\', '\\'
     $vbawsPassYaml = ConvertTo-ObfuscatedPassword $vbawsPassPlain
+    $vbawsVerifySsl = Read-VerifySslChoice "VBAWS"
+    $verifySslYaml = $vbawsVerifySsl.ToString().ToLower()
     $vbawsBlock = @"
   - name: vbaws
     type: vbaws
     url: $vbawsUrl
     username: "$vbawsUserYaml"
     password: "$vbawsPassYaml"
-    verify_ssl: false
+    verify_ssl: $verifySslYaml
 "@
 }
 
@@ -760,38 +888,42 @@ if ($NoSummary) {
 }
 
 # --- 2c. Check interval ---
-Write-Host ""
-Write-Host "[2c/5] Setting check interval" -ForegroundColor Yellow
-Write-Host ""
-while ($true) {
-    $intervalInput = Read-Host "  How often should VHC run checks? (minutes, default: 60)"
-    if ([string]::IsNullOrWhiteSpace($intervalInput)) {
-        $IntervalMinutes = 60
-        break
+if ($PSBoundParameters.ContainsKey('IntervalMinutes')) {
+    if ($IntervalMinutes -lt 1) {
+        Write-Host "ERROR: IntervalMinutes must be a positive integer." -ForegroundColor Red
+        exit 1
     }
-    $parsed = 0
-    if ([int]::TryParse($intervalInput, [ref]$parsed) -and $parsed -gt 0) {
-        $IntervalMinutes = $parsed
-        break
+    Write-Host ""
+    Write-Host "[2c/5] Check interval: $IntervalMinutes minutes (from -IntervalMinutes)" -ForegroundColor Yellow
+} else {
+    Write-Host ""
+    Write-Host "[2c/5] Setting check interval" -ForegroundColor Yellow
+    Write-Host ""
+    while ($true) {
+        $intervalInput = Read-Host "  How often should VHC run checks? (minutes, default: 5)"
+        if ([string]::IsNullOrWhiteSpace($intervalInput)) {
+            $IntervalMinutes = 5
+            break
+        }
+        $parsed = 0
+        if ([int]::TryParse($intervalInput, [ref]$parsed) -and $parsed -gt 0) {
+            $IntervalMinutes = $parsed
+            break
+        }
+        Write-Host "  Invalid input. Please enter a positive integer." -ForegroundColor Yellow
     }
-    Write-Host "  Invalid input. Please enter a positive integer." -ForegroundColor Yellow
 }
 Write-Host "  -> Check interval: $IntervalMinutes minutes" -ForegroundColor Green
 
-# Logs and state go in ProgramData so non-elevated manual runs can also write
 $dataDir = Join-Path $env:ProgramData "VHC"
-if (-not (Test-Path $dataDir)) {
-    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
-    # Grant Users modify access so non-elevated runs can write logs
-    icacls $dataDir /grant "Users:(OI)(CI)M" | Out-Null
-}
 $logDir = Join-Path $dataDir "logs"
-if (-not (Test-Path $logDir)) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-    icacls $logDir /grant "Users:(OI)(CI)M" 2>$null | Out-Null
-}
+Protect-VhcSystemDirectory $dataDir
+Protect-VhcSystemDirectory $logDir
 $logPath = Join-Path $logDir "veeam-vhc-aws.log"
 $statePath = Join-Path $dataDir "veeam-vhc-aws-state.json"
+$logYaml = $logPath -replace '\\', '/'
+$stateYaml = $statePath -replace '\\', '/'
+$dataDirYaml = $dataDir -replace '\\', '/'
 
 $configContent = @"
 # Veeam VHC AWS configuration
@@ -803,10 +935,11 @@ global:
   retry_delay_seconds: 5
   page_size: 500
   max_pages: 100
-  state_file: "$($statePath -replace '\\', '\\')"
+  data_directory: '$dataDirYaml'
+  state_file: '$stateYaml'
   logging:
     level: INFO
-    file: "$($logPath -replace '\\', '\\')"
+    file: '$logYaml'
     rotation_when: midnight
     rotation_interval: 1
     rotation_keep: 30
@@ -875,11 +1008,6 @@ Write-Host "[3/5] Creating scheduled task" -ForegroundColor Yellow
 
 $taskName = "Veeam VHC AWS"
 $exeFullPath = Join-Path $InstallDir "veeam-vhc-aws.exe"
-$taskAction = New-ScheduledTaskAction `
-    -Execute $exeFullPath `
-    -Argument "all --config `"$configPath`"" `
-    -WorkingDirectory $InstallDir
-
 $taskTrigger = New-ScheduledTaskTrigger `
     -Once `
     -At (Get-Date) `
@@ -902,35 +1030,21 @@ if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
     Write-Host "  -> Removed existing '$taskName' task" -ForegroundColor Yellow
 }
 
-# Write failure-alerting wrapper script
-$wrapperPath = Join-Path $InstallDir "Run-VhcAws.ps1"
-$alertUrlEscaped = if ($AlertUrl) { $AlertUrl } else { "" }
-$wrapperContent = @"
-# VHC AWS Monitor wrapper -- alerts on task failure
-`$exePath = Join-Path `$PSScriptRoot "veeam-vhc-aws.exe"
-`$configPath = Join-Path `$PSScriptRoot "veeam-vhc-aws.yaml"
-& `$exePath all --config `$configPath
-if (`$LASTEXITCODE -ne 0) {
-    `$alertUrl = "$alertUrlEscaped"  # substituted during setup
-    if (`$alertUrl) {
-        `$body = "VHC AWS scheduled task failed with exit code `$LASTEXITCODE on `$env:COMPUTERNAME"
-        try {
-            Invoke-WebRequest -Uri `$alertUrl -Method Post -Body `$body -UseBasicParsing -ErrorAction Stop | Out-Null
-        } catch {
-            Write-Warning "Failed to send failure alert: `$_"
-        }
-    }
+$taskScript = Join-Path $PSScriptRoot "scripts\vhc-tasks.ps1"
+if (-not (Test-Path $taskScript)) {
+    Write-Host "ERROR: $taskScript is missing. The scheduled tasks need it." -ForegroundColor Red
+    exit 1
 }
-"@
-[IO.File]::WriteAllText($wrapperPath, $wrapperContent, [System.Text.UTF8Encoding]::new($false))
+$alertUrlEscaped = if ($AlertUrl) { $AlertUrl } else { "" }
+$wrapperPath = & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $alertUrlEscaped
+$wrapperArgs = & $taskScript -Action task-argument -InstallDir $InstallDir -Command all -ConfigPath $configPath
 if ($AlertUrl) {
     Write-Host "  -> Failure alerting: wrapper script at $wrapperPath" -ForegroundColor Green
 }
 
-# Update task action to use the wrapper script
 $taskAction = New-ScheduledTaskAction `
     -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-    -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$wrapperPath`"" `
+    -Argument $wrapperArgs `
     -WorkingDirectory $InstallDir
 
 Register-ScheduledTask `
@@ -943,36 +1057,11 @@ Register-ScheduledTask `
 
 Write-Host "  -> Scheduled task '$taskName' created (every $IntervalMinutes min)" -ForegroundColor Green
 
-# --- 3b. Daily summary scheduled task ---
 if ($setupSummary) {
-    $summaryTaskName = "Veeam VHC AWS Daily Summary"
-    $summaryAction = New-ScheduledTaskAction `
-        -Execute $exeFullPath `
-        -Argument "summary --config `"$configPath`"" `
-        -WorkingDirectory $InstallDir
-
-    try {
-        $summaryTrigger = New-ScheduledTaskTrigger -Daily -At $summaryTimeVal
-    } catch {
-        Write-Host "  WARNING: Invalid time '$summaryTimeVal', defaulting to 08:00" -ForegroundColor Yellow
-        $summaryTimeVal = "08:00"
-        $summaryTrigger = New-ScheduledTaskTrigger -Daily -At $summaryTimeVal
-    }
-
-    if (Get-ScheduledTask -TaskName $summaryTaskName -ErrorAction SilentlyContinue) {
-        Unregister-ScheduledTask -TaskName $summaryTaskName -Confirm:$false
-        Write-Host "  -> Removed existing '$summaryTaskName' task" -ForegroundColor Yellow
-    }
-
-    Register-ScheduledTask `
-        -TaskName $summaryTaskName `
-        -Action $summaryAction `
-        -Trigger $summaryTrigger `
-        -Settings $taskSettings `
-        -Principal $taskPrincipal `
-        -Description "Daily Veeam VHC AWS health summary at $summaryTimeVal" | Out-Null
-
-    Write-Host "  -> Daily summary task '$summaryTaskName' created (daily at $summaryTimeVal)" -ForegroundColor Green
+    & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeFullPath -ConfigPath $configPath -Time $summaryTimeVal -AlertUrl $alertUrlEscaped
+    Write-Host "  -> Daily summary task 'Veeam VHC AWS Daily Summary' created (daily at $summaryTimeVal)" -ForegroundColor Green
+} else {
+    & $taskScript -Action unregister-daily
 }
 
 # --- 4. Run once to test ---
@@ -985,6 +1074,14 @@ try {
 } catch {
     Write-Host "  -> WARNING: Test run failed: $_" -ForegroundColor Yellow
     Write-Host "  -> The scheduled task is still configured. Check config and try manually." -ForegroundColor Yellow
+}
+
+# --- Admin UI shortcut (never fails the install) ---
+$shortcutOk = $true
+if (-not $NoShortcut) {
+    Write-Host ""
+    Write-Host "Creating admin UI shortcut" -ForegroundColor Yellow
+    $shortcutOk = Install-VhcAdminShortcuts -ExePath $exeFullPath -ConfigPath $configPath -WorkingDirectory $InstallDir -IncludeDesktop ([bool]$DesktopShortcut)
 }
 
 # --- 5. Success ---
@@ -1012,6 +1109,10 @@ Write-Host ""
 Write-Host "  Manual run:   & '$exeFullPath' all --config '$configPath'" -ForegroundColor Cyan
 Write-Host "  View logs:    Get-Content '$logPath' -Tail 50" -ForegroundColor Cyan
 Write-Host "  Edit config:  notepad '$configPath'" -ForegroundColor Cyan
+if (-not $NoShortcut -and $shortcutOk) {
+    Write-Host "  Admin UI:     Start Menu -> VHC AWS Admin" -ForegroundColor Cyan
+}
+Write-Host "  Admin UI (CLI, elevated shell): & '$exeFullPath' ui -c '$configPath'" -ForegroundColor Cyan
 Write-Host ""
 
 # TODO: Send a notification (via configured output handlers) when uninstall completes,

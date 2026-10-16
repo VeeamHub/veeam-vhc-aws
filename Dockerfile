@@ -15,4 +15,4 @@ FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
 WORKDIR /app
 COPY --from=build /app/publish/veeam-vhc-aws .
 ENTRYPOINT ["./veeam-vhc-aws"]
-CMD ["all", "--config", "/config/config.yaml"]
+CMD ["all", "--config", "/config/veeam-vhc-aws.yaml"]

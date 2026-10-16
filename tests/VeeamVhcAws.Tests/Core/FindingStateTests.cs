@@ -542,4 +542,55 @@ public class FindingStateTests
             if (File.Exists(statePath)) File.Delete(statePath);
         }
     }
+
+    [Fact]
+    public void UnreadableStateFile_IsLeftUntouched()
+    {
+        var statePath = GetTempStatePath();
+        var original = "{ this is not json";
+        File.WriteAllText(statePath, original);
+        try
+        {
+            var state = new FindingState(statePath);
+            state.SetLastSuccessTime("server1", "repo_health", DateTime.UtcNow);
+            state.ProcessResults(new List<MonitorResult>
+            {
+                new(MonitorType.RepoHealth, DateTime.UtcNow, 10, Severity.Warning,
+                    new List<Finding> { new(Severity.Warning, "repo:Test", "Low space") },
+                    server: "server1")
+            });
+
+            Assert.Equal(original, File.ReadAllText(statePath));
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentLastSuccessWrites_KeepEveryKey()
+    {
+        var statePath = GetTempStatePath();
+        try
+        {
+            const int writers = 12;
+            var tasks = Enumerable.Range(0, writers).Select(i => Task.Run(() =>
+            {
+                var state = new FindingState(statePath);
+                state.SetLastSuccessTime("server1", $"monitor-{i}", DateTime.UtcNow.AddMinutes(-i));
+            })).ToArray();
+            await Task.WhenAll(tasks);
+
+            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(statePath));
+            var lastSuccess = doc.RootElement.GetProperty("lastSuccess");
+            Assert.Equal(writers, lastSuccess.EnumerateObject().Count());
+            Assert.True(File.Exists(statePath + ".lock"));
+        }
+        finally
+        {
+            if (File.Exists(statePath)) File.Delete(statePath);
+            if (File.Exists(statePath + ".lock")) File.Delete(statePath + ".lock");
+        }
+    }
 }

@@ -45,10 +45,11 @@ public static class SummaryCommand
                 // Use daily_summary.output if specified, else fall back to main output config
                 var summaryOutput = summaryCfg.GetListOfSections("output");
                 List<IOutputHandler> handlers;
+                var summaryConfigPath = ConfigLoader.GetConfigPath(config);
                 if (summaryOutput.Count > 0)
-                    handlers = OutputHandlerFactory.CreateHandlers(new Dictionary<string, object> { ["output"] = summaryOutput });
+                    handlers = OutputHandlerFactory.CreateHandlers(new Dictionary<string, object> { ["output"] = summaryOutput }, summaryConfigPath);
                 else
-                    handlers = OutputHandlerFactory.CreateHandlers(cfg);
+                    handlers = OutputHandlerFactory.CreateHandlers(cfg, summaryConfigPath);
 
                 var dispatcher = new OutputDispatcher(handlers);
                 dispatcher.Emit(results);

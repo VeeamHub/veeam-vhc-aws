@@ -1,5 +1,7 @@
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.Diagnostics;
+using System.Net.Sockets;
 using Spectre.Console;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Logging;
@@ -18,20 +20,33 @@ public static class UiCommand
         var bindOption = new Option<string>("--bind", () => "127.0.0.1", "Address to bind (default: 127.0.0.1 = localhost-only)");
         var noBrowserOption = new Option<bool>("--no-browser", "Do not auto-open the browser");
         var regenTokenOption = new Option<bool>("--regen-token", "Regenerate the auth token and exit");
+        var requireTokenOption = new Option<bool>(
+            "--require-token",
+            "Require the auth token even when the bind address is loopback");
 
         command.AddOption(configOption);
         command.AddOption(portOption);
         command.AddOption(bindOption);
         command.AddOption(noBrowserOption);
         command.AddOption(regenTokenOption);
+        command.AddOption(requireTokenOption);
 
-        command.SetHandler(async (string? config, int port, string bind, bool noBrowser, bool regenToken) =>
+        command.SetHandler(async (InvocationContext context) =>
         {
+            var parsed = context.ParseResult;
+            var config = parsed.GetValueForOption(configOption);
+            var port = parsed.GetValueForOption(portOption);
+            var bind = parsed.GetValueForOption(bindOption)!;
+            var noBrowser = parsed.GetValueForOption(noBrowserOption);
+            var regenToken = parsed.GetValueForOption(regenTokenOption);
+            var requireToken = parsed.GetValueForOption(requireTokenOption);
+
             var configPath = ConfigLoader.GetConfigPath(config);
+            SecretKeyStore.BindProcessDirectory(configPath);
             if (File.Exists(configPath))
             {
                 var cfg = ConfigLoader.LoadConfig(configPath);
-                LoggingSetup.Setup(cfg);
+                LoggingSetup.Setup(cfg, configPath);
             }
             else if (TerminalCapabilities.IsInteractive)
             {
@@ -49,7 +64,28 @@ public static class UiCommand
             }
 
             var isLoopback = IsLoopback(bind);
-            var auth = BuildAuthOptions(isLoopback, tokenPath);
+            var auth = BuildAuthOptions(isLoopback, requireToken, tokenPath);
+
+            var existing = await DetectPortAsync(port, PortProbeTimeout);
+            if (existing == PortState.Foreign)
+            {
+                Console.Error.WriteLine(
+                    $"Port {port} is already in use by another program. Choose a different port with --port <number>.");
+                context.ExitCode = 1;
+                return;
+            }
+            if (existing is PortState.OursUi or PortState.OursUiTokenRequired)
+            {
+                var runningUrl = $"http://127.0.0.1:{port}";
+                Console.WriteLine($"The admin UI is already running at {runningUrl}");
+                // The running instance may require the token even when this launch would not
+                // (it was started with --bind or --require-token). Reuse the token it reads.
+                var token = auth.RequireToken ? auth.Token
+                    : existing == PortState.OursUiTokenRequired ? ReadExistingToken(tokenPath) : null;
+                if (!noBrowser && TerminalCapabilities.IsInteractive)
+                    OpenBrowser(string.IsNullOrEmpty(token) ? runningUrl : $"{runningUrl}/?t={token}");
+                return;
+            }
 
             var options = new WebHostOptions(configPath, bind, port);
             using var cts = new CancellationTokenSource();
@@ -88,9 +124,57 @@ public static class UiCommand
                 await WebHost.RunAsync(options, auth, cts.Token);
             }
             catch (OperationCanceledException) { /* clean shutdown */ }
-        }, configOption, portOption, bindOption, noBrowserOption, regenTokenOption);
+        });
 
         return command;
+    }
+
+    internal enum PortState { Free, OursUi, OursUiTokenRequired, Foreign }
+
+    private static readonly TimeSpan PortProbeTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Decides whether the target port is free, held by a running VHC admin UI, or held by something else.
+    /// Always probes 127.0.0.1 (even when the UI binds 0.0.0.0) and never sends credentials.
+    /// </summary>
+    internal static async Task<PortState> DetectPortAsync(int port, TimeSpan timeout)
+    {
+        using (var tcp = new TcpClient())
+        {
+            using var connectCts = new CancellationTokenSource(timeout);
+            try
+            {
+                await tcp.ConnectAsync(System.Net.IPAddress.Loopback, port, connectCts.Token);
+            }
+            catch (SocketException)
+            {
+                return PortState.Free;
+            }
+            catch (OperationCanceledException)
+            {
+                // Something accepted the SYN but never completed: the port is occupied.
+                return PortState.Foreign;
+            }
+        }
+
+        try
+        {
+            using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false })
+            {
+                Timeout = timeout,
+            };
+            using var response = await http.GetAsync($"http://127.0.0.1:{port}/", HttpCompletionOption.ResponseHeadersRead);
+            if (!response.Headers.TryGetValues(WebHost.IdentityHeader, out var values)
+                || !values.Contains(WebHost.IdentityHeaderValue))
+                return PortState.Foreign;
+            return response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+                ? PortState.OursUiTokenRequired
+                : PortState.OursUi;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            return PortState.Foreign;
+        }
     }
 
     private static bool IsLoopback(string bind) =>
@@ -104,13 +188,26 @@ public static class UiCommand
         return Path.Combine(dir, "ui-token.txt");
     }
 
-    private static AuthOptions BuildAuthOptions(bool isLoopback, string tokenPath)
+    internal static AuthOptions BuildAuthOptions(bool isLoopback, bool requireToken, string tokenPath)
     {
-        if (isLoopback)
+        if (isLoopback && !requireToken)
             return new AuthOptions { RequireToken = false, Token = "" };
 
         var token = ReadOrCreateToken(tokenPath);
         return new AuthOptions { RequireToken = true, Token = token };
+    }
+
+    private static string? ReadExistingToken(string path)
+    {
+        try
+        {
+            var existing = File.Exists(path) ? File.ReadAllText(path).Trim() : "";
+            return existing.Length >= 32 ? existing : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static string ReadOrCreateToken(string path)
@@ -129,8 +226,52 @@ public static class UiCommand
     {
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(path, token);
+
+        var ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+        };
+        if (!OperatingSystem.IsWindows())
+            options.UnixCreateMode = ownerOnly;
+
+        using (var stream = new FileStream(path, options))
+        using (var writer = new StreamWriter(stream))
+        {
+            writer.Write(token);
+        }
+
+        if (OperatingSystem.IsWindows())
+            RestrictWindowsTokenAcl(path);
+        else
+            File.SetUnixFileMode(path, ownerOnly);
     }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+
+    private static void RestrictWindowsTokenAcl(string path)
+    {
+        var user = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+        var args = string.Join(' ',
+            QuoteIcacls(path),
+            "/inheritance:r",
+            "/grant:r",
+            QuoteIcacls($"{user}:(R,W)"),
+            QuoteIcacls(@"NT AUTHORITY\SYSTEM:(R,W)"),
+            QuoteIcacls(@"BUILTIN\Administrators:(R,W)"));
+        using var proc = Process.Start(new ProcessStartInfo
+        {
+            FileName = "icacls",
+            Arguments = args,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        });
+        proc?.WaitForExit(5000);
+    }
+
+    private static string QuoteIcacls(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";
 
     private static void OpenBrowser(string url)
     {

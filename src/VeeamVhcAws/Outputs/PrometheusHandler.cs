@@ -19,8 +19,12 @@ public class PrometheusHandler : IOutputHandler
     private readonly string _url;
     private readonly string _job;
     private readonly int _port;
+    private readonly bool _allowLoopback;
     private readonly CollectorRegistry _registry;
     private bool _serverStarted;
+    private readonly List<string> _logs = new();
+
+    internal IReadOnlyList<string> Logs => _logs;
 
     private readonly Gauge _overallSeverity;
     private readonly Gauge _findingCount;
@@ -28,12 +32,13 @@ public class PrometheusHandler : IOutputHandler
     private readonly Gauge _findingMetric;
 
     public PrometheusHandler(string mode = "pushgateway", string? url = null,
-        string job = "veeam_vhc_aws", int port = 9100)
+        string job = "veeam_vhc_aws", int port = 9100, bool allowLoopback = false)
     {
         _mode = mode.ToLowerInvariant();
         _url = url ?? "localhost:9091";
         _job = job;
         _port = port;
+        _allowLoopback = allowLoopback;
         _registry = Metrics.NewCustomRegistry();
 
         var factory = Metrics.WithCustomRegistry(_registry);
@@ -79,29 +84,45 @@ public class PrometheusHandler : IOutputHandler
 
         if (_mode == "pushgateway")
         {
+            var endpoint = _url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? _url : $"http://{_url}";
+            var decision = OutboundUrlDecision.Decide(endpoint, _allowLoopback);
+            if (!decision.Allowed)
+            {
+                Record($"Pushgateway rejected for {decision.Host}: {decision.Reason}");
+                return;
+            }
+
             try
             {
+                using var client = OutboundUrlDecision.CreateClient();
                 var pusher = new MetricPusher(new MetricPusherOptions
                 {
-                    Endpoint = _url.StartsWith("http") ? _url : $"http://{_url}",
+                    Endpoint = endpoint,
                     Job = _job,
                     Registry = _registry,
+                    HttpClientProvider = () => client,
                 });
                 pusher.Start();
-                Thread.Sleep(500); // Allow time for push
+                Thread.Sleep(500);
                 pusher.Stop();
             }
             catch (Exception e)
             {
-                Logger.Error("Failed to push metrics to {Url}: {Error}", _url, e.Message);
+                Record($"Pushgateway failed for {decision.Host}: {e.Message}");
             }
         }
         else if (_mode == "server" && !_serverStarted)
         {
-            var server = new MetricServer(port: _port, registry: _registry);
+            var server = new MetricServer(hostname: "127.0.0.1", port: _port, registry: _registry);
             server.Start();
             _serverStarted = true;
             Logger.Information("Prometheus metric server started on port {Port}", _port);
         }
+    }
+
+    private void Record(string message)
+    {
+        _logs.Add(message);
+        Logger.Error("{PushgatewayLog}", message);
     }
 }

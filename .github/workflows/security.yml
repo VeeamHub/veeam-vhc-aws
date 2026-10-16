@@ -16,9 +16,9 @@ jobs:
     name: Vulnerable Package Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.x'
 
@@ -38,7 +38,7 @@ jobs:
     name: Secret Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -51,21 +51,13 @@ jobs:
     name: Plaintext Credential Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # TruffleHog and gitleaks both detect high-entropy provider tokens. Neither
       # matches a human-chosen password in a `password:` field, which is how
       # veeam-monitor.yaml stayed in this repo undetected. This gate covers that
       # class specifically: a literal credential assigned in a tracked config file.
-      # Allowed values are empty, ${VAR}, ${{ expr }}, {{ template }}, <placeholder>, null, ~.
+      # smtp_password is included. Allowed values are empty, ${VAR}, ${{ expr }},
+      # {{ template }}, <placeholder>, null, ~, and ENC: ciphertext.
       - name: Scan tracked config files for literal credentials
-        run: |
-          hits=$(git grep -nIE '^[[:space:]]*(password|passwd|secret|api[_-]?key|apikey|token|bind_?password)[[:space:]]*:[[:space:]]*[^[:space:]]' \
-                  -- '*.yaml' '*.yml' '*.json' '*.toml' '*.config' '*.xml' 2>/dev/null \
-                | grep -vE ':[[:space:]]*("" *|'"''"' *|\$\{\{.*\}\}|\$\{[^}]*\}|\{\{.*\}\}|<[^>]*>|null|~)[[:space:]]*,?[[:space:]]*$' || true)
-          if [ -n "$hits" ]; then
-            echo "$hits" | sed -E 's/(:[[:space:]]*).*/\1<redacted>/'
-            echo "::error::Literal credential found in a tracked config file. Use an env var or an empty placeholder."
-            exit 1
-          fi
-          echo "clean: no literal credentials in tracked config files"
+        run: bash .github/scripts/check-plaintext-credentials.sh

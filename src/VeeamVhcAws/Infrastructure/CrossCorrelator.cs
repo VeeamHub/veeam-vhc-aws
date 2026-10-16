@@ -54,14 +54,14 @@ public static class CrossCorrelator
             }
 
             var failedPolicies = allFindings
-                .Where(x => x.MonitorValue == "worker_health" && x.Finding.Resource.StartsWith("failed:"))
-                .Select(x => x.Finding.Resource)
+                .Where(x => x.MonitorValue == "worker_health" && BareResource(x.Finding.Resource).StartsWith("failed:"))
+                .Select(x => BareResource(x.Finding.Resource))
                 .Distinct()
                 .ToList();
             if (failedPolicies.Count >= 2)
             {
                 var worstPolicySev = allFindings
-                    .Where(x => x.MonitorValue == "worker_health" && x.Finding.Resource.StartsWith("failed:"))
+                    .Where(x => x.MonitorValue == "worker_health" && BareResource(x.Finding.Resource).StartsWith("failed:"))
                     .Max(x => x.Finding.Severity.Rank());
                 var summarySev = worstPolicySev >= Severity.Critical.Rank() ? Severity.Critical : Severity.Warning;
                 correlations.Add(new Finding(summarySev,
@@ -97,5 +97,16 @@ public static class CrossCorrelator
         }
 
         return results;
+    }
+
+    private static string BareResource(string resource)
+    {
+        if (resource.Length > 0 && resource[0] == '[')
+        {
+            var close = resource.IndexOf("] ", StringComparison.Ordinal);
+            if (close >= 0)
+                return resource[(close + 2)..];
+        }
+        return resource;
     }
 }

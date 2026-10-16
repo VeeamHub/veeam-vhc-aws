@@ -8,7 +8,6 @@ public interface IVbrClient
     List<Dictionary<string, object>> GetJobs();
     List<Dictionary<string, object>> GetBackups();
     List<Dictionary<string, object>> GetRestorePoints(int limit = 500, int offset = 0);
-    List<Dictionary<string, object>> RescanRepositories(List<string> repoIds);
     Dictionary<string, object> GetServerInfo();
     List<Dictionary<string, object>> GetManagedServers(string? typeFilter = null);
     List<Dictionary<string, object>> GetInventory(string hostname,

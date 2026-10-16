@@ -1,3 +1,4 @@
+using System.Globalization;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Ui;
 
@@ -5,7 +6,7 @@ namespace VeeamVhcAws.Web.Services;
 
 public record ServerView(string Name, string Type, string Url, string Username, bool VerifySsl, string ApiVersion);
 
-public record OutputView(string Type, Dictionary<string, object?> Fields);
+public record OutputView(string Type, Dictionary<string, object?> Fields, string? Id = null);
 
 public record ConfigSnapshot(
     string ConfigPath,
@@ -20,10 +21,12 @@ public record ConfigSnapshot(
 
 public record ServerEdit(string Name, string Type, string Url, string Username, string Password, bool PasswordChanged, bool VerifySsl, string ApiVersion);
 
-public record OutputEdit(string Type, Dictionary<string, object?> Fields, IReadOnlySet<string> ChangedSecretKeys);
+public record OutputEdit(string Type, Dictionary<string, object?> Fields, IReadOnlySet<string> ChangedSecretKeys, string? Id = null);
 
 public class ConfigService
 {
+    public const string UrlChangeRequiresPassword = "A server URL change requires a new password.";
+
     private readonly string _configPath;
     private readonly object _saveLock = new();
 
@@ -52,12 +55,13 @@ public class ConfigService
             .ToList();
 
         var outputs = cfg.GetListOfSections("output")
-            .Select(o =>
+            .Select((o, index) =>
             {
                 var fields = new Dictionary<string, object?>();
+                var outputType = o.Get("type", "unknown");
                 foreach (var (k, v) in o)
-                    if (k != "type") fields[k] = MaskSecret(k, v);
-                return new OutputView(o.Get("type", "unknown"), fields);
+                    if (k != "type") fields[k] = MaskSecret(outputType, k, v);
+                return new OutputView(o.Get("type", "unknown"), fields, LoadedOutputId(index));
             })
             .ToList();
 
@@ -73,10 +77,6 @@ public class ConfigService
             DailySummary: cfg.GetSection("daily_summary"));
     }
 
-    /// <summary>
-    /// Replace the servers section with the provided list. Preserves password obfuscation:
-    /// if <c>PasswordChanged</c> is false, the existing on-disk password is kept verbatim.
-    /// </summary>
     public void SaveServers(IReadOnlyList<ServerEdit> servers)
     {
         lock (_saveLock)
@@ -91,6 +91,13 @@ public class ConfigService
             var newList = new List<object>();
             foreach (var s in servers)
             {
+                if (!s.PasswordChanged &&
+                    existingByName.TryGetValue(s.Name, out var priorForUrl) &&
+                    !string.Equals(priorForUrl.Get("url", ""), s.Url, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(UrlChangeRequiresPassword);
+                }
+
                 string passwordOnDisk;
                 if (s.PasswordChanged)
                 {
@@ -133,17 +140,26 @@ public class ConfigService
                 : new Dictionary<string, object>();
 
             var existingList = existing.GetListOfSections("output");
+            var priorByLoadId = new Dictionary<string, Dictionary<string, object>>(existingList.Count);
+            for (int index = 0; index < existingList.Count; index++)
+                priorByLoadId[LoadedOutputId(index)] = existingList[index];
 
             var newList = new List<object>();
-            for (int i = 0; i < outputs.Count; i++)
+            foreach (var o in outputs)
             {
-                var o = outputs[i];
+                priorByLoadId.TryGetValue(o.Id ?? "", out var prior);
                 var entry = new Dictionary<string, object> { ["type"] = o.Type };
                 foreach (var (k, v) in o.Fields)
                 {
                     if (v is null) continue;
 
-                    if (IsSecretKey(k))
+                    if (o.Type.Equals("webhook", StringComparison.OrdinalIgnoreCase) &&
+                        k.Equals("url", StringComparison.OrdinalIgnoreCase) &&
+                        v is string submittedUrl && submittedUrl == "********")
+                    {
+                        entry[k] = WebhookUrlFor(prior);
+                    }
+                    else if (IsSecretKey(k))
                     {
                         if (o.ChangedSecretKeys.Contains(k))
                         {
@@ -152,12 +168,21 @@ public class ConfigService
                         }
                         else
                         {
-                            entry[k] = i < existingList.Count ? existingList[i].Get(k, "") : "";
+                            entry[k] = prior?.Get(k, "") ?? "";
                         }
                     }
                     else
                     {
                         entry[k] = v;
+                    }
+                }
+                if (prior != null &&
+                    string.Equals(prior.Get("type", ""), o.Type, StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var (k, v) in prior)
+                    {
+                        if (!entry.ContainsKey(k))
+                            entry[k] = v;
                     }
                 }
                 newList.Add(entry);
@@ -166,6 +191,27 @@ public class ConfigService
             existing["output"] = newList;
             WriteYaml(existing);
         }
+    }
+
+    internal static Dictionary<string, object> OverlaySection(
+        Dictionary<string, object> existing,
+        Dictionary<string, object> updates)
+    {
+        var result = new Dictionary<string, object>(existing);
+        foreach (var (key, value) in updates)
+        {
+            if (value is Dictionary<string, object> updateMap &&
+                result.TryGetValue(key, out var current) &&
+                current is Dictionary<string, object> currentMap)
+            {
+                result[key] = OverlaySection(currentMap, updateMap);
+            }
+            else
+            {
+                result[key] = value;
+            }
+        }
+        return result;
     }
 
     public void SaveMonitorSection(string sectionName, Dictionary<string, object> section)
@@ -180,10 +226,21 @@ public class ConfigService
         }
     }
 
-    private static bool IsSecretKey(string key) =>
-        key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-        key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-        key.Contains("secret", StringComparison.OrdinalIgnoreCase);
+    private const string LoadedOutputPrefix = "loaded:";
+
+    private static string LoadedOutputId(int index) =>
+        LoadedOutputPrefix + index.ToString(CultureInfo.InvariantCulture);
+
+    private static string WebhookUrlFor(Dictionary<string, object>? prior)
+    {
+        if (prior == null)
+            return "";
+        if (!prior.Get("type", "").Equals("webhook", StringComparison.OrdinalIgnoreCase))
+            return "";
+        return prior.Get("url", "");
+    }
+
+    private static bool IsSecretKey(string key) => ConfigSecrets.IsSecretKey(key);
 
     private void WriteYaml(Dictionary<string, object> config)
     {
@@ -196,12 +253,12 @@ public class ConfigService
         File.Move(tmp, _configPath, overwrite: true);
     }
 
-    private static object? MaskSecret(string key, object? value)
+    private static object? MaskSecret(string outputType, string key, object? value)
     {
         if (value is null) return null;
-        if (key.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("token", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("secret", StringComparison.OrdinalIgnoreCase))
+        var maskWebhook = outputType.Equals("webhook", StringComparison.OrdinalIgnoreCase) &&
+            key.Equals("url", StringComparison.OrdinalIgnoreCase);
+        if (maskWebhook || IsSecretKey(key))
             return string.IsNullOrEmpty(value as string) ? "" : "********";
         return value;
     }

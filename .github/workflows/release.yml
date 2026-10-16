@@ -16,9 +16,9 @@ jobs:
     name: Test (.NET)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.x'
 
@@ -27,13 +27,16 @@ jobs:
           dotnet restore src/VeeamVhcAws/VeeamVhcAws.csproj
           dotnet test tests/VeeamVhcAws.Tests/VeeamVhcAws.Tests.csproj -c Release -v normal
 
+      - name: Test admin UI
+        run: dotnet test tests/VeeamVhcAws.UiTests/VeeamVhcAws.UiTests.csproj -c Release -v normal
+
   security:
     name: Security Gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.x'
 
@@ -53,9 +56,9 @@ jobs:
     runs-on: windows-latest
     needs: [test, security]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.x'
 
@@ -84,7 +87,7 @@ jobs:
 
       # --- Azure OIDC login (exchanges GitHub token for Azure credentials) ---
       - name: Azure Login (OIDC)
-        uses: azure/login@v3
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -92,7 +95,7 @@ jobs:
 
       # --- Azure Trusted Signing ---
       - name: Sign exe (Azure Trusted Signing)
-        uses: azure/trusted-signing-action@v2
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
         with:
           endpoint: https://eus.codesigning.azure.net/
           trusted-signing-account-name: vadamc

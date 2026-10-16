@@ -108,10 +108,43 @@ public class VbawsClient : IVbawsClient
         ["orderAsc"] = "false",
     };
 
+    // The global fetch pages like the per-job fetch. One page hid every session past it, so a
+    // busy server dropped (for example) deduplicated workloads out of the failure-rate math.
+    private const int SessionPageSize = 200;
+    private const int MaxSessionPages = 50; // circuit breaker: cap 10k sessions per fetch
+
     public List<Dictionary<string, object>> GetSessions(DateTime from, DateTime to)
     {
-        var result = Request("GET", "/api/v1/sessions", BaseSessionQuery(from, to));
-        return ExtractDataList(result);
+        var all = new List<Dictionary<string, object>>();
+        var seenIds = new HashSet<string>();
+
+        for (int page = 0; page < MaxSessionPages; page++)
+        {
+            var queryParams = BaseSessionQuery(from, to);
+            queryParams["Limit"] = SessionPageSize.ToString();
+            queryParams["Offset"] = (page * SessionPageSize).ToString();
+            var batch = ExtractDataList(Request("GET", "/api/v1/sessions", queryParams));
+            if (batch.Count == 0) break;
+
+            // Same guard as GetSessionsForJob: a server that ignores Offset returns the same rows
+            // each page, so stop as soon as a page contributes no new session id.
+            int added = 0;
+            foreach (var s in batch)
+            {
+                var id = s.GetApiString("id", "Id", "");
+                if (id.Length == 0 || seenIds.Add(id))
+                {
+                    all.Add(s);
+                    added++;
+                }
+            }
+            if (added == 0 || batch.Count < SessionPageSize) break;
+
+            if (page == MaxSessionPages - 1)
+                Logger.Warning("VBAWS global session fetch stopped at the {Cap}-session cap", MaxSessionPages * SessionPageSize);
+        }
+
+        return all;
     }
 
     public Dictionary<string, object> GetSessionDetails(string sessionId)

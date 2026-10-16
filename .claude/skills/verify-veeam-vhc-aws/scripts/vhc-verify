@@ -1,0 +1,539 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+REPO=$(cd "$SCRIPT_DIR/../../../.." && pwd -P)
+ROOT=${VHC_VERIFY_ROOT:-/tmp/vhc-verify}
+LATEST="$ROOT/latest"
+# macOS keeps lsof in /usr/sbin, which agent shells often leave off PATH.
+export PATH="$PATH:/usr/sbin:/sbin"
+
+if [ -x "$HOME/.dotnet/dotnet" ]; then
+  export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+  export PATH="$DOTNET_ROOT:$PATH"
+fi
+if [ -d /usr/local/share/dotnet ]; then
+  export DOTNET_ROOT="${DOTNET_ROOT:-/usr/local/share/dotnet}"
+  export PATH="$DOTNET_ROOT:$PATH"
+fi
+export DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+die() {
+  echo "vhc-verify: $*" >&2
+  exit 1
+}
+
+run_id() {
+  if [ -n "${VHC_VERIFY_RUN_ID:-}" ]; then
+    printf '%s\n' "$VHC_VERIFY_RUN_ID"
+    return 0
+  fi
+  if [ ! -f "$LATEST" ]; then
+    echo "vhc-verify: no run yet. Start one with: $SCRIPT_DIR/vhc-verify launch" >&2
+    return 1
+  fi
+  cat "$LATEST"
+}
+
+run_dir() {
+  local id=${RUN_ID:-}
+  if [ -z "$id" ]; then
+    id=$(run_id) || exit 1
+  fi
+  printf '%s/runs/%s\n' "$ROOT" "$id"
+}
+
+meta_path() {
+  printf '%s/meta.env\n' "$(run_dir)"
+}
+
+load_meta() {
+  local meta
+  meta=$(meta_path)
+  [ -f "$meta" ] || die "missing $meta. Launch this run first."
+  # shellcheck disable=SC1090
+  . "$meta"
+}
+
+# Start a command as a new session leader, so cleanup can signal the whole
+# process group. macOS has no setsid binary; perl's POSIX::setsid does the same.
+new_session() {
+  if command -v setsid >/dev/null 2>&1; then
+    exec setsid "$@"
+  fi
+  exec perl -MPOSIX -e 'POSIX::setsid() != -1 or die "setsid: $!\n"; exec @ARGV or die "exec: $!\n"' "$@"
+}
+
+chrome_bin() {
+  if [ -n "${CHROME_BIN:-}" ] && [ -x "$CHROME_BIN" ]; then
+    printf '%s\n' "$CHROME_BIN"
+    return
+  fi
+  local candidate
+  for candidate in \
+    /usr/local/bin/google-chrome \
+    /usr/bin/google-chrome \
+    /opt/google/chrome/chrome \
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+  die "Google Chrome was not found. Set CHROME_BIN."
+}
+
+ensure_node_deps() {
+  if [ ! -d "$SCRIPT_DIR/node_modules/playwright-core" ]; then
+    npm install --omit=dev --prefix "$SCRIPT_DIR" >/dev/null
+  fi
+}
+
+write_meta() {
+  cat > "$(meta_path)" <<EOF
+RUN_ID=$(printf '%q' "$RUN_ID")
+PID=$PID
+PORT=$PORT
+URL=$(printf '%q' "$URL")
+CONFIG=$(printf '%q' "$CONFIG")
+DATA_DIR=$(printf '%q' "$DATA_DIR")
+EVIDENCE_DIR=$(printf '%q' "$EVIDENCE_DIR")
+REPO=$(printf '%q' "$REPO")
+STATE_PATH=$(printf '%q' "$STATE_PATH")
+BIND=127.0.0.1
+EOF
+}
+
+alive() {
+  local pid=$1
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+descendants() {
+  local pid=$1
+  local child
+  echo "$pid"
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    descendants "$child"
+  done
+}
+
+port_owner_is_ours() {
+  local port=$1
+  local root_pid=$2
+  local owners
+  owners=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)
+  [ -n "$owners" ] || return 1
+  local owner tree
+  tree=$(descendants "$root_pid" | sort -u)
+  for owner in $owners; do
+    if ! printf '%s\n' "$tree" | grep -qx "$owner"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+stop_pid() {
+  local pid=$1
+  alive "$pid" || return 0
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  local i
+  for i in 1 2 3 4 5; do
+    alive "$pid" || return 0
+    sleep 0.2
+  done
+  kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+}
+
+cmd_launch() {
+  [ -f "$REPO/src/VeeamVhcAws/VeeamVhcAws.csproj" ] || die "repo root $REPO has no VeeamVhcAws project"
+  command -v dotnet >/dev/null 2>&1 || die "dotnet is not on PATH. Install the .NET 10 SDK. Cloud agents run bash .cursor/install.sh"
+  local id
+  if [ -n "${VHC_VERIFY_RUN_ID:-}" ]; then
+    id=$VHC_VERIFY_RUN_ID
+  else
+    id=$(date +%Y%m%d%H%M%S)-$$
+  fi
+  local dir="$ROOT/runs/$id"
+  if [ -f "$dir/meta.env" ]; then
+    # shellcheck disable=SC1090
+    . "$dir/meta.env"
+    if alive "${PID:-}"; then
+      die "run $id is already up at ${URL:-unknown}. Set a new VHC_VERIFY_RUN_ID or run cleanup."
+    fi
+  fi
+  mkdir -p "$dir/data" "$ROOT/evidence/$id"
+  local port
+  port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+  local config="$dir/data/veeam-vhc-aws.yaml"
+  rm -f "$config"
+  local log="$dir/ui.log"
+  (
+    cd "$dir/data"
+    new_session dotnet run --project "$REPO/src/VeeamVhcAws/VeeamVhcAws.csproj" -- ui \
+      -c "$config" \
+      --bind 127.0.0.1 \
+      --port "$port" \
+      --no-browser
+  ) >"$log" 2>&1 &
+  local pid=$!
+  RUN_ID=$id
+  PID=$pid
+  PORT=$port
+  URL="http://127.0.0.1:$port"
+  CONFIG=$config
+  DATA_DIR="$dir/data"
+  EVIDENCE_DIR="$ROOT/evidence/$id"
+  STATE_PATH="$DATA_DIR/veeam-vhc-aws-state.json"
+  write_meta
+  if [ -z "${VHC_VERIFY_RUN_ID:-}" ]; then
+    printf '%s\n' "$id" >"$LATEST"
+  fi
+
+  local i code body
+  for i in $(seq 1 180); do
+    if ! alive "$pid"; then
+      echo "UI process exited before it was ready. Log tail:" >&2
+      tail -n 40 "$log" >&2 || true
+      die "launch failed"
+    fi
+    code=$(curl -s -o /tmp/vhc-healthz-"$id" -w '%{http_code}' "$URL/healthz" || true)
+    if [ "$code" = "200" ] && grep -q '"status":"ok"' /tmp/vhc-healthz-"$id"; then
+      body=$(curl -fsS "$URL/" || true)
+      if printf '%s' "$body" | grep -q 'VHC AWS' && printf '%s' "$body" | grep -q 'Dashboard'; then
+        echo "ready $URL"
+        echo "run $id"
+        echo "config $config"
+        echo "evidence $EVIDENCE_DIR"
+        echo "state $STATE_PATH"
+        echo "log $log"
+        rm -f /tmp/vhc-healthz-"$id"
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  echo "Timed out waiting for $URL. Log tail:" >&2
+  tail -n 40 "$log" >&2 || true
+  stop_pid "$pid"
+  die "UI did not become usable"
+}
+
+cmd_doctor() {
+  load_meta
+  local fail=0
+  note() { echo "$*"; }
+  bad() { echo "FAIL $*"; fail=1; }
+
+  note "run=$RUN_ID"
+  note "url=$URL"
+  note "pid=$PID"
+  note "port=$PORT"
+  note "bind=$BIND"
+  note "config=$CONFIG"
+  note "data=$DATA_DIR"
+  note "evidence=$EVIDENCE_DIR"
+  if [ -z "${STATE_PATH:-}" ]; then
+    STATE_PATH="$DATA_DIR/veeam-vhc-aws-state.json"
+  fi
+  note "state=$STATE_PATH"
+  if [ -f "$STATE_PATH" ]; then
+    note "stateExists=true"
+  else
+    note "stateExists=false"
+  fi
+  if [ -f "$CONFIG" ]; then
+    note "configExists=true"
+  else
+    note "configExists=false"
+  fi
+
+  if alive "$PID"; then
+    note "process=up"
+  else
+    bad "process is not running"
+  fi
+
+  if [ "${BIND:-}" = "127.0.0.1" ]; then
+    note "auth=none"
+  else
+    bad "bind is ${BIND:-unset}. Verification only drives loopback, which has no token."
+  fi
+
+  if port_owner_is_ours "$PORT" "$PID"; then
+    note "portOwner=ours"
+  else
+    bad "port $PORT is not owned by pid $PID or its children"
+  fi
+
+  local code
+  code=$(curl -s -o /tmp/vhc-doctor-healthz -w '%{http_code}' "$URL/healthz" || true)
+  if [ "$code" = "200" ] && grep -q '"status":"ok"' /tmp/vhc-doctor-healthz; then
+    note "healthz=ok"
+  else
+    bad "healthz returned ${code:-none}"
+  fi
+
+  local page
+  page=$(curl -fsS "$URL/" || true)
+  if printf '%s' "$page" | grep -q 'VHC AWS' && printf '%s' "$page" | grep -q 'Dashboard'; then
+    note "homepage=Dashboard"
+  else
+    bad "homepage is missing the VHC AWS shell or the Dashboard heading"
+  fi
+  rm -f /tmp/vhc-doctor-healthz
+
+  if [ "$fail" -ne 0 ]; then
+    exit 1
+  fi
+  note "doctor=ok"
+}
+
+ensure_browser() {
+  load_meta
+  local dir
+  dir=$(run_dir)
+  if [ -f "$dir/browser.pid" ] && alive "$(cat "$dir/browser.pid")"; then
+    return 0
+  fi
+  ensure_node_deps
+  local token
+  token=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
+  printf '%s\n' "$token" >"$dir/browser.token"
+  chmod 600 "$dir/browser.token"
+  rm -f "$dir/browser.port"
+  CHROME_BIN=$(chrome_bin) \
+    VHC_EVIDENCE="$EVIDENCE_DIR" \
+    node "$SCRIPT_DIR/browser-daemon.mjs" \
+      --url "$URL" \
+      --port-file "$dir/browser.port" \
+      --token-file "$dir/browser.token" \
+      >"$dir/browser.log" 2>&1 &
+  echo $! >"$dir/browser.pid"
+  local i
+  for i in $(seq 1 50); do
+    if [ -s "$dir/browser.port" ]; then
+      return 0
+    fi
+    if ! alive "$(cat "$dir/browser.pid")"; then
+      echo "Browser daemon exited. Log tail:" >&2
+      tail -n 40 "$dir/browser.log" >&2 || true
+      die "browser failed to start"
+    fi
+    sleep 0.2
+  done
+  die "browser daemon did not write a port"
+}
+
+browser_command() {
+  ensure_browser
+  local dir payload
+  dir=$(run_dir)
+  payload=$1
+  local port token response
+  port=$(cat "$dir/browser.port")
+  token=$(cat "$dir/browser.token")
+  response=$(curl -fsS -X POST "http://127.0.0.1:$port/command" \
+    -H "authorization: Bearer $token" \
+    -H 'content-type: application/json' \
+    --data "$payload")
+  python3 -c 'import json,sys; body=json.loads(sys.argv[1]);
+print(json.dumps(body, indent=2));
+sys.exit(0 if body.get("ok") else 1)' "$response"
+}
+
+cmd_browser() {
+  local op=${1:-}
+  shift || true
+  case "$op" in
+    goto)
+      [ $# -eq 1 ] || die "usage: vhc-verify browser goto /servers"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"goto","path":sys.argv[1]}))' "$1")"
+      ;;
+    click)
+      local role="" name="" within=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --role) role=$2; shift 2 ;;
+          --name) name=$2; shift 2 ;;
+          --within-heading) within=$2; shift 2 ;;
+          *) die "unknown click arg $1" ;;
+        esac
+      done
+      [ -n "$role" ] && [ -n "$name" ] || die "usage: vhc-verify browser click --role button --name Save"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"click","role":sys.argv[1],"name":sys.argv[2],"withinHeading":sys.argv[3] or None}))' "$role" "$name" "$within")"
+      ;;
+    fill)
+      local label="" value=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --label) label=$2; shift 2 ;;
+          --value) value=$2; shift 2 ;;
+          *) die "unknown fill arg $1" ;;
+        esac
+      done
+      [ -n "$label" ] && [ -n "$value" ] || die "usage: vhc-verify browser fill --label Name --value lab-vbr"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"fill","label":sys.argv[1],"value":sys.argv[2]}))' "$label" "$value")"
+      ;;
+    select)
+      local label="" value=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --label) label=$2; shift 2 ;;
+          --value) value=$2; shift 2 ;;
+          *) die "unknown select arg $1" ;;
+        esac
+      done
+      [ -n "$label" ] && [ -n "$value" ] || die "usage: vhc-verify browser select --label Type --value json_file"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"select","label":sys.argv[1],"value":sys.argv[2]}))' "$label" "$value")"
+      ;;
+    wait-text)
+      [ $# -eq 1 ] || die "usage: vhc-verify browser wait-text 'Server added'"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"wait-text","text":sys.argv[1]}))' "$1")"
+      ;;
+    wait-heading)
+      [ $# -eq 1 ] || die "usage: vhc-verify browser wait-heading 'Add Server'"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"wait-heading","name":sys.argv[1]}))' "$1")"
+      ;;
+    wait-hidden)
+      [ $# -eq 1 ] || die "usage: vhc-verify browser wait-hidden 'No servers configured yet.'"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"wait-hidden","text":sys.argv[1]}))' "$1")"
+      ;;
+    wait-value)
+      local label="" value="" saw_value=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --label) label=$2; shift 2 ;;
+          --value) value=$2; saw_value=1; shift 2 ;;
+          *) die "unknown wait-value arg $1" ;;
+        esac
+      done
+      [ -n "$label" ] && [ "$saw_value" -eq 1 ] || die "usage: vhc-verify browser wait-value --label URL --value https://lab-vbr:9419"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"wait-value","label":sys.argv[1],"value":sys.argv[2]}))' "$label" "$value")"
+      ;;
+    assert-text)
+      [ $# -eq 1 ] || die "usage: vhc-verify browser assert-text lab-vbr"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"assert-text","text":sys.argv[1]}))' "$1")"
+      ;;
+    assert-absent)
+      [ $# -eq 1 ] || die "usage: vhc-verify browser assert-absent 'No servers configured yet.'"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"assert-absent","text":sys.argv[1]}))' "$1")"
+      ;;
+    screenshot)
+      local path=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --path) path=$2; shift 2 ;;
+          *) die "unknown screenshot arg $1" ;;
+        esac
+      done
+      [ -n "$path" ] || die "usage: vhc-verify browser screenshot --path evidence/page.png"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"screenshot","path":sys.argv[1]}))' "$path")"
+      ;;
+    snapshot)
+      local path=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --path) path=$2; shift 2 ;;
+          *) die "unknown snapshot arg $1" ;;
+        esac
+      done
+      [ -n "$path" ] || die "usage: vhc-verify browser snapshot --path evidence/page.aria.txt"
+      browser_command "$(python3 -c 'import json,sys; print(json.dumps({"op":"snapshot","path":sys.argv[1]}))' "$path")"
+      ;;
+    *)
+      die "usage: vhc-verify browser goto|click|fill|select|wait-text|wait-heading|wait-hidden|wait-value|assert-text|assert-absent|screenshot|snapshot"
+      ;;
+  esac
+}
+
+cmd_assert_server() {
+  load_meta
+  local name="" url="" username="" secret="" verify=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name) name=$2; shift 2 ;;
+      --url) url=$2; shift 2 ;;
+      --username) username=$2; shift 2 ;;
+      --password-absent) secret=$2; shift 2 ;;
+      --verify-ssl) verify=$2; shift 2 ;;
+      *) die "unknown assert-server arg $1" ;;
+    esac
+  done
+  [ -n "$name" ] && [ -n "$url" ] && [ -n "$username" ] && [ -n "$secret" ] || \
+    die "usage: vhc-verify assert-server --name lab-vbr --url https://lab-vbr.example:9419 --username backupadmin --password-absent verify-secret"
+  [ -f "$CONFIG" ] || die "config file was not created at $CONFIG"
+  mkdir -p "$EVIDENCE_DIR/servers"
+  cp "$CONFIG" "$EVIDENCE_DIR/servers/config.yaml"
+  python3 - "$CONFIG" "$name" "$url" "$username" "$secret" "$verify" <<'PY'
+import sys
+path, name, url, username, secret, verify = sys.argv[1:7]
+text = open(path, encoding="utf-8").read()
+errors = []
+for needle in (name, url, username, "ENC:"):
+    if needle not in text:
+        errors.append(f"missing {needle}")
+if verify in ("true", "false") and f"verify_ssl: {verify}" not in text:
+    errors.append(f"missing verify_ssl: {verify}")
+if secret in text:
+    errors.append("plaintext password is in the config file")
+if errors:
+    print("\n".join(errors), file=sys.stderr)
+    sys.exit(1)
+print("config ok")
+print(path)
+PY
+}
+
+cmd_evidence_dir() {
+  load_meta
+  printf '%s\n' "$EVIDENCE_DIR"
+}
+
+cmd_cleanup() {
+  local id dir
+  id=$(run_id)
+  dir="$ROOT/runs/$id"
+  if [ -f "$dir/browser.pid" ]; then
+    stop_pid "$(cat "$dir/browser.pid")"
+  fi
+  if [ -f "$dir/meta.env" ]; then
+    # shellcheck disable=SC1090
+    . "$dir/meta.env"
+    if [ -n "${PID:-}" ]; then
+      stop_pid "$PID"
+    fi
+  fi
+  rm -rf "$dir"
+  if [ -f "$LATEST" ] && [ "$(cat "$LATEST")" = "$id" ]; then
+    rm -f "$LATEST"
+  fi
+  echo "cleaned $id"
+  echo "evidence kept at $ROOT/evidence/$id"
+}
+
+usage() {
+  cat <<EOF
+Usage: vhc-verify launch|doctor|browser|assert-server|evidence-dir|cleanup
+EOF
+  exit 1
+}
+
+main() {
+  local cmd=${1:-}
+  shift || true
+  case "$cmd" in
+    launch) cmd_launch "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    browser) cmd_browser "$@" ;;
+    assert-server) cmd_assert_server "$@" ;;
+    evidence-dir) cmd_evidence_dir "$@" ;;
+    cleanup) cmd_cleanup "$@" ;;
+    *) usage ;;
+  esac
+}
+
+main "$@"

@@ -26,7 +26,7 @@ global:
 
 # Servers to monitor — add as many as needed
 # Each entry must have: name, type (vbr or vbaws), url
-# Servers >5 automatically run in parallel
+# 2 or fewer servers run one after another; 3+ servers run in parallel
 servers:
   - name: prod-vbr
     type: vbr
@@ -104,13 +104,13 @@ output:
   #   smtp_username: alerts@example.com
   #   smtp_password: ""   # run 'veeam-vhc-aws encrypt-config' to obfuscate
   #   use_tls: true
+  #   deduplicate: true   # false = email every run, even for findings already alerted
 
 repo_health:
   enabled: true
   thresholds:
     free_space_warning_pct: 15
     free_space_critical_pct: 5
-    rescan_on_unhealthy: true
   include_external_repos: true
   check_external_maintenance: true
   external_maintenance_lookback_hours: 48
