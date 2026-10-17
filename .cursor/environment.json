@@ -1,0 +1,4 @@
+{
+  "name": "veeam-vhc-aws",
+  "install": "bash .cursor/install.sh"
+}

@@ -2,10 +2,13 @@
 @rendermode InteractiveServer
 @inject ConfigService Config
 @inject StateService State
+@inject IDailySummaryTaskHost Tasks
+@using VeeamVhcAws.Scheduling
 
 <PageTitle>Settings — Veeam VHC AWS</PageTitle>
 
 <h1>Global Settings</h1>
+<p class="muted">Tool-wide settings. Most setups never need to change these.</p>
 
 @if (_cfg is null)
 {
@@ -26,8 +29,8 @@ else
     <section class="form-section">
         <h2>Logging</h2>
         <div class="form-row">
-            <label>Log level</label>
-            <select @bind="_logLevel">
+            <label for="settings-log-level">Log level</label>
+            <select id="settings-log-level" @bind="_logLevel">
                 <option value="DEBUG">DEBUG</option>
                 <option value="INFO">INFO</option>
                 <option value="WARNING">WARNING</option>
@@ -35,60 +38,60 @@ else
             </select>
         </div>
         <div class="form-row">
-            <label>Log file path</label>
-            <input type="text" @bind="_logFile" />
+            <label for="settings-log-file">Log file path</label>
+            <input id="settings-log-file" type="text" @bind="_logFile" />
         </div>
         <div class="form-row">
-            <label>Rotation: keep N daily files</label>
-            <input type="number" min="1" max="365" @bind="_rotationKeep" />
+            <label for="settings-rotation-keep">Rotation: keep N daily files</label>
+            <input id="settings-rotation-keep" type="number" min="1" max="365" @bind="_rotationKeep" />
         </div>
         <div class="form-row">
             <label><input type="checkbox" @bind="_logConsole" /> Also log to console (stderr)</label>
         </div>
         <div class="form-row">
-            <label>Disk free space warning threshold (%)</label>
-            <input type="number" min="0" max="100" @bind="_diskWarnPct" />
+            <label for="settings-disk-warn">Disk free space warning threshold (%)</label>
+            <input id="settings-disk-warn" type="number" min="0" max="100" @bind="_diskWarnPct" />
         </div>
     </section>
 
     <section class="form-section">
         <h2>HTTP / API Tuning</h2>
         <div class="form-row">
-            <label>Request timeout (seconds)</label>
-            <input type="number" min="5" max="300" @bind="_timeoutSeconds" />
+            <label for="settings-timeout">Request timeout (seconds)</label>
+            <input id="settings-timeout" type="number" min="5" max="300" @bind="_timeoutSeconds" />
         </div>
         <div class="form-row">
-            <label>Retry count</label>
-            <input type="number" min="0" max="10" @bind="_retryCount" />
+            <label for="settings-retry-count">Retry count</label>
+            <input id="settings-retry-count" type="number" min="0" max="10" @bind="_retryCount" />
         </div>
         <div class="form-row">
-            <label>Retry delay (seconds)</label>
-            <input type="number" min="1" max="60" @bind="_retryDelay" />
+            <label for="settings-retry-delay">Retry delay (seconds)</label>
+            <input id="settings-retry-delay" type="number" min="1" max="60" @bind="_retryDelay" />
         </div>
         <div class="form-row">
-            <label>API page size</label>
-            <input type="number" min="10" max="5000" @bind="_pageSize" />
+            <label for="settings-page-size">API page size</label>
+            <input id="settings-page-size" type="number" min="10" max="5000" @bind="_pageSize" />
         </div>
         <div class="form-row">
-            <label>Max pages (circuit breaker)</label>
-            <input type="number" min="1" max="10000" @bind="_maxPages" />
+            <label for="settings-max-pages">Max pages (circuit breaker)</label>
+            <input id="settings-max-pages" type="number" min="1" max="10000" @bind="_maxPages" />
         </div>
         <div class="form-row">
-            <label>Session timeout — /api/v1/sessions (seconds) <span class="muted">raise for very large deployments</span></label>
-            <input type="number" min="30" max="3600" @bind="_sessionTimeoutSeconds" />
+            <label for="settings-session-timeout">Session timeout — /api/v1/sessions (seconds) <span class="muted">raise for very large deployments</span></label>
+            <input id="settings-session-timeout" type="number" min="30" max="3600" @bind="_sessionTimeoutSeconds" />
         </div>
     </section>
 
     <section class="form-section">
         <h2>Daily Summary</h2>
         <div class="form-row">
-            <label><input type="checkbox" @bind="_dailySummaryEnabled" /> Enable daily summary email/notification</label>
+            <label for="settings-daily-summary"><input id="settings-daily-summary" type="checkbox" @bind="_dailySummaryEnabled" /> Enable daily summary email/notification</label>
         </div>
         <p class="muted">Time is controlled by the scheduled task, not this config.</p>
     </section>
 
     <div class="form-actions">
-        <button class="btn" @onclick="SaveAll">Save Settings</button>
+        <button type="button" class="btn" @onclick="SaveAll">Save Settings</button>
     </div>
 
     @if (_unmappedGlobal.Count > 0)
@@ -102,7 +105,7 @@ else
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -174,6 +177,8 @@ else
     {
         if (_cfg is null) return;
 
+        var existingLogging = _cfg.Global.GetValueOrDefault("logging") as Dictionary<string, object>
+            ?? new Dictionary<string, object>();
         var global = new Dictionary<string, object>(_cfg.Global)
         {
             ["timeout_seconds"] = _timeoutSeconds,
@@ -182,14 +187,14 @@ else
             ["retry_delay_seconds"] = _retryDelay,
             ["page_size"] = _pageSize,
             ["max_pages"] = _maxPages,
-            ["logging"] = new Dictionary<string, object>
+            ["logging"] = ConfigService.OverlaySection(existingLogging, new Dictionary<string, object>
             {
                 ["level"] = _logLevel,
                 ["file"] = _logFile,
                 ["rotation_keep"] = _rotationKeep,
                 ["console"] = _logConsole,
                 ["disk_warning_pct"] = _diskWarnPct,
-            },
+            }),
         };
         Config.SaveMonitorSection("global", global);
 
@@ -199,18 +204,29 @@ else
         };
         Config.SaveMonitorSection("daily_summary", dailySummary);
 
-        _flash = "Settings saved";
+        try
+        {
+            var outcome = DailySummaryTaskSync.Apply(_dailySummaryEnabled, Tasks, _cfg.ConfigPath, DailySummaryTaskSync.DefaultTime);
+            _flash = outcome switch
+            {
+                "registered" => "Settings saved. Daily summary task registered.",
+                "unregistered" => "Settings saved. Daily summary task removed.",
+                _ => "Settings saved",
+            };
+        }
+        catch (Exception ex)
+        {
+            _flash = "Settings saved. Daily summary task was not updated: " + ex.Message;
+        }
         _cfg = Config.Load();
         Load();
     }
 
-    private static int ToInt(object? v, int dflt) => v switch
+    private static int ToInt(object? v, int dflt)
     {
-        int i => i,
-        double d => (int)d,
-        string s when int.TryParse(s, out var i) => i,
-        _ => dflt,
-    };
+        try { return v is null ? dflt : Convert.ToInt32(v, System.Globalization.CultureInfo.InvariantCulture); }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException) { return dflt; }
+    }
 
     private static bool ToBool(object? v, bool dflt) => v switch
     {

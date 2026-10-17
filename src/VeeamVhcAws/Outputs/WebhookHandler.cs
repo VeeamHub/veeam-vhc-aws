@@ -18,18 +18,43 @@ public class WebhookHandler : IOutputHandler
         [Severity.Error] = "#cc0000",
     };
 
+    private static readonly Dictionary<Severity, string> PagerDutySeverities = new()
+    {
+        [Severity.Ok] = "info", [Severity.Warning] = "warning",
+        [Severity.Critical] = "critical", [Severity.Error] = "error",
+    };
+
+    private static readonly Dictionary<Severity, string> NtfyPriorities = new()
+    {
+        [Severity.Ok] = "low", [Severity.Warning] = "default",
+        [Severity.Critical] = "high", [Severity.Error] = "urgent",
+    };
+
+    private static readonly Dictionary<Severity, string> NtfyTags = new()
+    {
+        [Severity.Ok] = "white_check_mark", [Severity.Warning] = "warning",
+        [Severity.Critical] = "rotating_light", [Severity.Error] = "x",
+    };
+
+    private const int NtfyMaxBody = 3800;
+
     private readonly string _url;
     private readonly string _template;
     private readonly Severity _minSeverity;
     private readonly bool _deduplicate;
+    private readonly bool _allowLoopback;
+    private readonly List<string> _logs = new();
+
+    internal IReadOnlyList<string> Logs => _logs;
 
     public WebhookHandler(string url, string template = "generic",
-        string minSeverity = "ok", bool deduplicate = true)
+        string minSeverity = "ok", bool deduplicate = true, bool allowLoopback = false)
     {
         _url = url;
         _template = template.ToLowerInvariant();
         _minSeverity = SeverityExtensions.ParseSeverity(minSeverity);
         _deduplicate = deduplicate;
+        _allowLoopback = allowLoopback;
     }
 
     private bool ShouldSend(IReadOnlyList<MonitorResult> results)
@@ -38,33 +63,94 @@ public class WebhookHandler : IOutputHandler
         return results.Any(r => r.OverallSeverity.Rank() >= minOrder);
     }
 
+    // --- Shared building blocks ---
+
+    private static string Upper(Severity severity) => severity.ToLowerString().ToUpperInvariant();
+
+    private static Severity Worst(IReadOnlyList<MonitorResult> results) =>
+        results.Aggregate(Severity.Ok, (acc, r) => r.OverallSeverity.Rank() > acc.Rank() ? r.OverallSeverity : acc);
+
+    private static bool IsCorrelation(MonitorResult result) =>
+        result.Monitor.ToLowerString() == "cross_correlation";
+
+    /// <summary>"monitor (server)", or just "monitor" when the result has no server.</summary>
+    private static string MonitorLabel(MonitorResult result) =>
+        !string.IsNullOrEmpty(result.Server)
+            ? $"{result.Monitor.ToLowerString()} ({result.Server})"
+            : result.Monitor.ToLowerString();
+
+    /// <summary>Drops a leading "[server] " from a resource that already names its server.</summary>
+    private static string StripServerPrefix(string resource, string server) =>
+        !string.IsNullOrEmpty(server) && resource.StartsWith($"[{server}] ")
+            ? resource[($"[{server}] ".Length)..]
+            : resource;
+
+    /// <summary>Non-OK, non-metric findings: what the summary templates list as issues.</summary>
+    private static IEnumerable<Finding> IssueFindings(MonitorResult result) =>
+        result.Findings.Where(f => f.Severity != Severity.Ok && f.MetricName == null);
+
+    private static string FindingLines(IEnumerable<Finding> findings, string bullet) =>
+        string.Join("\n", findings.Select(f => $"{bullet} [{Upper(f.Severity)}] {f.Resource}: {f.Message}"));
+
+    private static Dictionary<string, object> SlackAttachment(string color, Dictionary<string, object> block) =>
+        new()
+        {
+            ["color"] = color,
+            ["blocks"] = new List<object> { block },
+        };
+
+    private static Dictionary<string, object> SlackBlock(string blockType, string textType, string text) =>
+        new()
+        {
+            ["type"] = blockType,
+            ["text"] = new Dictionary<string, object> { ["type"] = textType, ["text"] = text },
+        };
+
+    private static Dictionary<string, object> SlackSection(string color, string mrkdwn) =>
+        SlackAttachment(color, SlackBlock("section", "mrkdwn", mrkdwn));
+
+    private static Dictionary<string, object> TeamsCard(string themeColor, string summary,
+        List<Dictionary<string, object>> sections) =>
+        new()
+        {
+            ["@type"] = "MessageCard",
+            ["@context"] = "http://schema.org/extensions",
+            ["themeColor"] = themeColor.TrimStart('#'),
+            ["summary"] = summary,
+            ["sections"] = sections,
+        };
+
+    private static Dictionary<string, object> Fact(string name, string value) =>
+        new() { ["name"] = name, ["value"] = value };
+
+    private static Dictionary<string, object> NtfyPayload(string title, Severity worst, List<string> lines)
+    {
+        var body = string.Join("\n", lines).Trim();
+        if (body.Length > NtfyMaxBody)
+            body = body[..NtfyMaxBody] + "\n... (truncated)";
+
+        return new Dictionary<string, object>
+        {
+            ["_ntfy_headers"] = new Dictionary<string, object>
+            {
+                ["Title"] = $"{title}: {Upper(worst)}",
+                ["Priority"] = NtfyPriorities.GetValueOrDefault(worst, "default"),
+                ["Tags"] = NtfyTags.GetValueOrDefault(worst, "bell"),
+                ["Markdown"] = "yes",
+            },
+            ["_ntfy_body"] = body,
+        };
+    }
+
+    // --- Alert templates ---
+
     private Dictionary<string, object> FormatSlack(IReadOnlyList<MonitorResult> results)
     {
-        var attachments = new List<Dictionary<string, object>>();
-        foreach (var result in results)
-        {
-            var color = SeverityColors.GetValueOrDefault(result.OverallSeverity, "#808080");
-            var findingLines = result.Findings
-                .Select(f => $"• [{f.Severity.ToLowerString().ToUpperInvariant()}] {f.Resource}: {f.Message}")
-                .ToList();
-
-            attachments.Add(new Dictionary<string, object>
-            {
-                ["color"] = color,
-                ["blocks"] = new List<object>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["type"] = "section",
-                        ["text"] = new Dictionary<string, object>
-                        {
-                            ["type"] = "mrkdwn",
-                            ["text"] = $"*{result.Monitor.ToLowerString()}* — {result.OverallSeverity.ToLowerString().ToUpperInvariant()}\nDuration: {result.DurationMs}ms\n{string.Join("\n", findingLines)}"
-                        }
-                    }
-                }
-            });
-        }
+        var attachments = results
+            .Select(result => SlackSection(
+                SeverityColors.GetValueOrDefault(result.OverallSeverity, "#808080"),
+                $"*{result.Monitor.ToLowerString()}* — {Upper(result.OverallSeverity)}\nDuration: {result.DurationMs}ms\n{FindingLines(result.Findings, "•")}"))
+            .ToList();
         return new Dictionary<string, object> { ["attachments"] = attachments };
     }
 
@@ -76,43 +162,26 @@ public class WebhookHandler : IOutputHandler
         foreach (var result in results)
         {
             overallColor = SeverityColors.GetValueOrDefault(result.OverallSeverity, overallColor);
-            var facts = new List<Dictionary<string, object>>
-            {
-                new() { ["name"] = "Monitor", ["value"] = result.Monitor.ToLowerString() },
-                new() { ["name"] = "Severity", ["value"] = result.OverallSeverity.ToLowerString().ToUpperInvariant() },
-                new() { ["name"] = "Duration", ["value"] = $"{result.DurationMs}ms" },
-                new() { ["name"] = "Findings", ["value"] = result.Findings.Count.ToString() },
-            };
             sections.Add(new Dictionary<string, object>
             {
                 ["activityTitle"] = $"Veeam VHC AWS: {result.Monitor.ToLowerString()}",
-                ["facts"] = facts,
-                ["text"] = string.Join("\n", result.Findings
-                    .Select(f => $"- [{f.Severity.ToLowerString().ToUpperInvariant()}] {f.Resource}: {f.Message}")),
+                ["facts"] = new List<Dictionary<string, object>>
+                {
+                    Fact("Monitor", result.Monitor.ToLowerString()),
+                    Fact("Severity", Upper(result.OverallSeverity)),
+                    Fact("Duration", $"{result.DurationMs}ms"),
+                    Fact("Findings", result.Findings.Count.ToString()),
+                },
+                ["text"] = FindingLines(result.Findings, "-"),
             });
         }
 
-        return new Dictionary<string, object>
-        {
-            ["@type"] = "MessageCard",
-            ["@context"] = "http://schema.org/extensions",
-            ["themeColor"] = overallColor.TrimStart('#'),
-            ["summary"] = "Veeam VHC AWS Results",
-            ["sections"] = sections,
-        };
+        return TeamsCard(overallColor, "Veeam VHC AWS Results", sections);
     }
 
     private Dictionary<string, object> FormatPagerDuty(IReadOnlyList<MonitorResult> results)
     {
-        var worst = results.Aggregate(Severity.Ok, (acc, r) =>
-            r.OverallSeverity.Rank() > acc.Rank() ? r.OverallSeverity : acc);
-
-        var pdSeverityMap = new Dictionary<Severity, string>
-        {
-            [Severity.Ok] = "info", [Severity.Warning] = "warning",
-            [Severity.Critical] = "critical", [Severity.Error] = "error",
-        };
-
+        var worst = Worst(results);
         var summaryParts = results.Select(r =>
             $"{r.Monitor.ToLowerString()}: {r.OverallSeverity.ToLowerString()} ({r.Findings.Count} findings)");
 
@@ -123,7 +192,7 @@ public class WebhookHandler : IOutputHandler
             ["payload"] = new Dictionary<string, object>
             {
                 ["summary"] = string.Join("; ", summaryParts),
-                ["severity"] = pdSeverityMap.GetValueOrDefault(worst, "info"),
+                ["severity"] = PagerDutySeverities.GetValueOrDefault(worst, "info"),
                 ["source"] = "veeam-vhc-aws",
                 ["component"] = "veeam-backup",
                 ["custom_details"] = new Dictionary<string, object>
@@ -144,31 +213,16 @@ public class WebhookHandler : IOutputHandler
 
     private Dictionary<string, object> FormatNtfy(IReadOnlyList<MonitorResult> results)
     {
-        var worst = results.Aggregate(Severity.Ok, (acc, r) =>
-            r.OverallSeverity.Rank() > acc.Rank() ? r.OverallSeverity : acc);
-
-        var ntfyPriority = new Dictionary<Severity, string>
-        {
-            [Severity.Ok] = "low", [Severity.Warning] = "default",
-            [Severity.Critical] = "high", [Severity.Error] = "urgent",
-        };
-        var ntfyTags = new Dictionary<Severity, string>
-        {
-            [Severity.Ok] = "white_check_mark", [Severity.Warning] = "warning",
-            [Severity.Critical] = "rotating_light", [Severity.Error] = "x",
-        };
-
         var lines = new List<string>();
         foreach (var result in results)
         {
             if (result.OverallSeverity == Severity.Ok) continue;
-            if (result.Monitor.ToLowerString() == "cross_correlation") continue;
+            if (IsCorrelation(result)) continue;
 
             var serverLabel = !string.IsNullOrEmpty(result.Server) ? $" ({result.Server})" : "";
-            var nonMetricFindings = result.Findings.Where(f => f.MetricName == null).ToList();
-
-            var alertable = nonMetricFindings
-                .Where(f => f.Severity != Severity.Ok
+            var alertable = result.Findings
+                .Where(f => f.MetricName == null
+                    && f.Severity != Severity.Ok
                     && !(_deduplicate && f.Details.ContainsKey("_seen_before") && f.Details["_seen_before"] is true))
                 .ToList();
 
@@ -177,12 +231,7 @@ public class WebhookHandler : IOutputHandler
             lines.Add($"**{result.Monitor.ToLowerString()}{serverLabel}**");
             var hasConnectionFindings = alertable.Any(f => f.Resource.Contains("connection"));
             foreach (var f in alertable.Take(15))
-            {
-                var resource = f.Resource;
-                if (!string.IsNullOrEmpty(result.Server) && resource.StartsWith($"[{result.Server}] "))
-                    resource = resource[($"[{result.Server}] ".Length)..];
-                lines.Add($"- {resource}: {TruncateMessage(f.Message)}");
-            }
+                lines.Add($"- {StripServerPrefix(f.Resource, result.Server)}: {TruncateMessage(f.Message)}");
             if (alertable.Count > 15)
                 lines.Add($"- ... and {alertable.Count - 15} more");
 
@@ -195,51 +244,28 @@ public class WebhookHandler : IOutputHandler
 
         // OK monitor summary
         var okMonitors = results
-            .Where(r => r.OverallSeverity == Severity.Ok && r.Monitor.ToLowerString() != "cross_correlation")
+            .Where(r => r.OverallSeverity == Severity.Ok && !IsCorrelation(r))
             .ToList();
         if (okMonitors.Count > 0)
-        {
-            var okSummary = string.Join(", ", okMonitors.Select(r =>
-                !string.IsNullOrEmpty(r.Server) ? $"{r.Monitor.ToLowerString()} ({r.Server})" : r.Monitor.ToLowerString()));
-            lines.Add($"OK: {okSummary}");
-        }
+            lines.Add($"OK: {string.Join(", ", okMonitors.Select(MonitorLabel))}");
 
         // Resolved findings
-        var resolved = new List<string>();
-        foreach (var result in results)
-            foreach (var f in result.Findings.Where(f => f.Message.StartsWith("RESOLVED:")))
-            {
-                var resource = f.Resource;
-                if (!string.IsNullOrEmpty(result.Server) && resource.StartsWith($"[{result.Server}] "))
-                    resource = resource[($"[{result.Server}] ".Length)..];
-                resolved.Add($"- {resource}: {f.Message}");
-            }
+        var resolved = results
+            .SelectMany(result => result.Findings
+                .Where(f => f.Message.StartsWith("RESOLVED:"))
+                .Select(f => $"- {StripServerPrefix(f.Resource, result.Server)}: {f.Message}"))
+            .ToList();
         if (resolved.Count > 0)
         {
             lines.Add("**Resolved:**");
-            foreach (var r in resolved.Take(10))
-                lines.Add(r);
+            lines.AddRange(resolved.Take(10));
             lines.Add("");
         }
 
         if (lines.Count == 0)
             lines.Add("All monitors OK");
 
-        var body = string.Join("\n", lines).Trim();
-        if (body.Length > 3800)
-            body = body[..3800] + "\n... (truncated)";
-
-        return new Dictionary<string, object>
-        {
-            ["_ntfy_headers"] = new Dictionary<string, object>
-            {
-                ["Title"] = $"veeam-vhc-aws: {worst.ToLowerString().ToUpperInvariant()}",
-                ["Priority"] = ntfyPriority.GetValueOrDefault(worst, "default"),
-                ["Tags"] = ntfyTags.GetValueOrDefault(worst, "bell"),
-                ["Markdown"] = "yes",
-            },
-            ["_ntfy_body"] = body,
-        };
+        return NtfyPayload("veeam-vhc-aws", Worst(results), lines);
     }
 
     private static string BoldWorkloads(string message)
@@ -273,22 +299,10 @@ public class WebhookHandler : IOutputHandler
         return message[..maxLength] + "…";
     }
 
+    // --- Daily-summary templates ---
+
     private Dictionary<string, object> FormatNtfySummary(IReadOnlyList<MonitorResult> results)
     {
-        var worst = results.Aggregate(Severity.Ok, (acc, r) =>
-            r.OverallSeverity.Rank() > acc.Rank() ? r.OverallSeverity : acc);
-
-        var ntfyPriority = new Dictionary<Severity, string>
-        {
-            [Severity.Ok] = "low", [Severity.Warning] = "default",
-            [Severity.Critical] = "high", [Severity.Error] = "urgent",
-        };
-        var ntfyTags = new Dictionary<Severity, string>
-        {
-            [Severity.Ok] = "white_check_mark", [Severity.Warning] = "warning",
-            [Severity.Critical] = "rotating_light", [Severity.Error] = "x",
-        };
-
         var now = DateTime.Now;
         var dateStr = $"{now:MMMM} {now.Day}, {now.Year}";
 
@@ -297,24 +311,19 @@ public class WebhookHandler : IOutputHandler
 
         foreach (var result in results)
         {
-            if (result.Monitor.ToLowerString() == "cross_correlation") continue;
+            if (IsCorrelation(result)) continue;
 
             if (result.OverallSeverity == Severity.Ok)
             {
-                var label = !string.IsNullOrEmpty(result.Server)
-                    ? $"{result.Monitor.ToLowerString()} ({result.Server})" : result.Monitor.ToLowerString();
-                healthyMonitors.Add(label);
+                healthyMonitors.Add(MonitorLabel(result));
                 continue;
             }
 
-            foreach (var f in result.Findings.Where(f => f.MetricName == null && f.Severity != Severity.Ok))
+            foreach (var f in IssueFindings(result))
             {
-                var resource = f.Resource;
-                if (!string.IsNullOrEmpty(result.Server) && resource.StartsWith($"[{result.Server}] "))
-                    resource = resource[($"[{result.Server}] ".Length)..];
                 var icon = f.Severity is Severity.Critical or Severity.Error ? "🔴" : "⚠️";
                 var serverTag = !string.IsNullOrEmpty(result.Server) ? $"[{result.Server}] " : "";
-                issueLines.Add($"{icon} {serverTag}{resource} — {BoldWorkloads(TruncateMessage(f.Message))}");
+                issueLines.Add($"{icon} {serverTag}{StripServerPrefix(f.Resource, result.Server)} — {BoldWorkloads(TruncateMessage(f.Message))}");
             }
         }
 
@@ -336,105 +345,39 @@ public class WebhookHandler : IOutputHandler
             lines.Add($"**Healthy:** {string.Join(", ", healthyMonitors)}");
         }
 
-        var body = string.Join("\n", lines).Trim();
-        if (body.Length > 3800)
-            body = body[..3800] + "\n... (truncated)";
-
-        return new Dictionary<string, object>
-        {
-            ["_ntfy_headers"] = new Dictionary<string, object>
-            {
-                ["Title"] = $"Daily Summary: {worst.ToLowerString().ToUpperInvariant()}",
-                ["Priority"] = ntfyPriority.GetValueOrDefault(worst, "default"),
-                ["Tags"] = ntfyTags.GetValueOrDefault(worst, "bell"),
-                ["Markdown"] = "yes",
-            },
-            ["_ntfy_body"] = body,
-        };
+        return NtfyPayload("Daily Summary", Worst(results), lines);
     }
 
     private Dictionary<string, object> FormatSlackSummary(IReadOnlyList<MonitorResult> results)
     {
         var attachments = new List<Dictionary<string, object>>
         {
-            new()
-            {
-                ["color"] = "#0076D7",
-                ["blocks"] = new List<object>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["type"] = "header",
-                        ["text"] = new Dictionary<string, object>
-                        {
-                            ["type"] = "plain_text",
-                            ["text"] = "Daily Veeam VHC AWS Summary",
-                        }
-                    }
-                }
-            }
+            SlackAttachment("#0076D7", SlackBlock("header", "plain_text", "Daily Veeam VHC AWS Summary")),
         };
 
         var healthyServers = new List<string>();
         foreach (var result in results)
         {
-            if (result.Monitor.ToLowerString() == "cross_correlation") continue;
+            if (IsCorrelation(result)) continue;
 
             if (result.OverallSeverity == Severity.Ok)
             {
-                var label = !string.IsNullOrEmpty(result.Server)
-                    ? $"{result.Monitor.ToLowerString()} ({result.Server})" : result.Monitor.ToLowerString();
-                healthyServers.Add(label);
+                healthyServers.Add(MonitorLabel(result));
                 continue;
             }
 
-            var color = SeverityColors.GetValueOrDefault(result.OverallSeverity, "#808080");
-            var findingLines = result.Findings
-                .Where(f => f.Severity != Severity.Ok && f.MetricName == null)
-                .Select(f => $"• [{f.Severity.ToLowerString().ToUpperInvariant()}] {f.Resource}: {f.Message}")
-                .ToList();
-
-            if (findingLines.Count > 0)
+            var issues = IssueFindings(result).ToList();
+            if (issues.Count > 0)
             {
+                var color = SeverityColors.GetValueOrDefault(result.OverallSeverity, "#808080");
                 var serverLabel = !string.IsNullOrEmpty(result.Server) ? $" ({result.Server})" : "";
-                attachments.Add(new Dictionary<string, object>
-                {
-                    ["color"] = color,
-                    ["blocks"] = new List<object>
-                    {
-                        new Dictionary<string, object>
-                        {
-                            ["type"] = "section",
-                            ["text"] = new Dictionary<string, object>
-                            {
-                                ["type"] = "mrkdwn",
-                                ["text"] = $"*{result.Monitor.ToLowerString()}{serverLabel}*\n{string.Join("\n", findingLines)}"
-                            }
-                        }
-                    }
-                });
+                attachments.Add(SlackSection(color,
+                    $"*{result.Monitor.ToLowerString()}{serverLabel}*\n{FindingLines(issues, "•")}"));
             }
         }
 
         if (healthyServers.Count > 0)
-        {
-            attachments.Add(new Dictionary<string, object>
-            {
-                ["color"] = "#36a64f",
-                ["blocks"] = new List<object>
-                {
-                    new Dictionary<string, object>
-                    {
-                        ["type"] = "section",
-                        ["text"] = new Dictionary<string, object>
-                        {
-                            ["type"] = "mrkdwn",
-                            ["text"] = $"*Healthy:* {string.Join(", ", healthyServers)}",
-                        }
-                    }
-                }
-            });
-        }
+            attachments.Add(SlackSection("#36a64f", $"*Healthy:* {string.Join(", ", healthyServers)}"));
 
         return new Dictionary<string, object> { ["attachments"] = attachments };
     }
@@ -447,31 +390,26 @@ public class WebhookHandler : IOutputHandler
 
         foreach (var result in results)
         {
-            if (result.Monitor.ToLowerString() == "cross_correlation") continue;
+            if (IsCorrelation(result)) continue;
 
             if (result.OverallSeverity == Severity.Ok)
             {
-                var label = !string.IsNullOrEmpty(result.Server)
-                    ? $"{result.Monitor.ToLowerString()} ({result.Server})" : result.Monitor.ToLowerString();
-                healthyMonitors.Add(label);
+                healthyMonitors.Add(MonitorLabel(result));
                 continue;
             }
 
             overallColor = SeverityColors.GetValueOrDefault(result.OverallSeverity, overallColor);
-            var facts = new List<Dictionary<string, object>>
-            {
-                new() { ["name"] = "Monitor", ["value"] = result.Monitor.ToLowerString() },
-                new() { ["name"] = "Server", ["value"] = !string.IsNullOrEmpty(result.Server) ? result.Server : "N/A" },
-                new() { ["name"] = "Severity", ["value"] = result.OverallSeverity.ToLowerString().ToUpperInvariant() },
-                new() { ["name"] = "Findings", ["value"] = result.Findings.Count.ToString() },
-            };
             sections.Add(new Dictionary<string, object>
             {
                 ["activityTitle"] = result.Monitor.ToLowerString(),
-                ["facts"] = facts,
-                ["text"] = string.Join("\n", result.Findings
-                    .Where(f => f.Severity != Severity.Ok && f.MetricName == null)
-                    .Select(f => $"- [{f.Severity.ToLowerString().ToUpperInvariant()}] {f.Resource}: {f.Message}")),
+                ["facts"] = new List<Dictionary<string, object>>
+                {
+                    Fact("Monitor", result.Monitor.ToLowerString()),
+                    Fact("Server", !string.IsNullOrEmpty(result.Server) ? result.Server : "N/A"),
+                    Fact("Severity", Upper(result.OverallSeverity)),
+                    Fact("Findings", result.Findings.Count.ToString()),
+                },
+                ["text"] = FindingLines(IssueFindings(result), "-"),
             });
         }
 
@@ -482,20 +420,13 @@ public class WebhookHandler : IOutputHandler
                 ["activityTitle"] = "Healthy Monitors",
                 ["facts"] = new List<Dictionary<string, object>>
                 {
-                    new() { ["name"] = "Healthy monitors", ["value"] = string.Join(", ", healthyMonitors) }
+                    Fact("Healthy monitors", string.Join(", ", healthyMonitors)),
                 },
                 ["text"] = "",
             });
         }
 
-        return new Dictionary<string, object>
-        {
-            ["@type"] = "MessageCard",
-            ["@context"] = "http://schema.org/extensions",
-            ["themeColor"] = overallColor.TrimStart('#'),
-            ["summary"] = "Daily Veeam VHC AWS Summary",
-            ["sections"] = sections,
-        };
+        return TeamsCard(overallColor, "Daily Veeam VHC AWS Summary", sections);
     }
 
     public void Emit(IReadOnlyList<MonitorResult> results)
@@ -504,7 +435,7 @@ public class WebhookHandler : IOutputHandler
 
         if (!isSummary && !ShouldSend(results))
         {
-            Logger.Information("Webhook skipped for {Url} — severity below threshold ({MinSeverity})", _url, _minSeverity);
+            Record($"Webhook skipped for {HostForLog(_url)} — severity below threshold ({_minSeverity})");
             return;
         }
 
@@ -532,26 +463,23 @@ public class WebhookHandler : IOutputHandler
             };
         }
 
-        // For ntfy with dedup: skip if no new alertable findings
-        if (!isSummary && _template == "ntfy" && _deduplicate)
+        // Dedup applies to every template: skip when nothing is new and nothing resolved.
+        if (!isSummary && _deduplicate && !results.HasNewOrResolvedFindings())
         {
-            var hasNewAlerts = results.SelectMany(r => r.Findings).Any(f =>
-                f.Severity != Severity.Ok
-                && f.MetricName == null
-                && !(f.Details.ContainsKey("_seen_before") && f.Details["_seen_before"] is true)
-                && !f.Message.StartsWith("RESOLVED:"));
-            var hasResolved = results.SelectMany(r => r.Findings).Any(f => f.Message.StartsWith("RESOLVED:"));
+            Record($"Webhook skipped for {HostForLog(_url)} — no new or resolved findings (dedup)");
+            return;
+        }
 
-            if (!hasNewAlerts && !hasResolved)
-            {
-                Logger.Information("Webhook skipped for {Url} — no new or resolved findings (dedup)", _url);
-                return;
-            }
+        var decision = OutboundUrlDecision.Decide(_url, _allowLoopback);
+        if (!decision.Allowed)
+        {
+            Record($"Webhook rejected for {decision.Host}: {decision.Reason}");
+            return;
         }
 
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var client = OutboundUrlDecision.CreateClient();
             HttpResponseMessage response;
 
             if (_template == "ntfy")
@@ -577,12 +505,24 @@ public class WebhookHandler : IOutputHandler
             }
 
             response.EnsureSuccessStatusCode();
-            Logger.Information("Webhook sent to {Url} (template={Template}, status={StatusCode})",
-                _url, _template, (int)response.StatusCode);
+            Record($"Webhook sent to {HostForLog(_url)} (template={_template}, status={(int)response.StatusCode})");
         }
         catch (Exception e)
         {
-            Logger.Error("Webhook failed for {Url}: {Error}", _url, e.Message);
+            Record($"Webhook failed for {HostForLog(_url)}: {e.Message}");
         }
+    }
+
+    private void Record(string message)
+    {
+        _logs.Add(message);
+        Logger.Information("{WebhookLog}", message);
+    }
+
+    private static string HostForLog(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
+            return uri.Host;
+        return "invalid-webhook-host";
     }
 }

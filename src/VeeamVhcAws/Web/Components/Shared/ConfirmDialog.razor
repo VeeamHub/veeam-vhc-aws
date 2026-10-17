@@ -1,0 +1,15 @@
+<DialogShell Title="@Title" TitleId="confirm-dialog-title" OnCancel="OnCancel">
+    @ChildContent
+    <div class="form-actions">
+        <button type="button" class="btn-secondary" @onclick="OnCancel">Cancel</button>
+        <button type="button" class="btn btn-warn" @onclick="OnConfirm">@ConfirmName</button>
+    </div>
+</DialogShell>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string ConfirmName { get; set; } = "Confirm delete";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

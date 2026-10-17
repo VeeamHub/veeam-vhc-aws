@@ -249,6 +249,16 @@ public class WorkerHealthMonitor : IMonitor
             var failedSessions = typeSessions.Where(s => GetSessionState(s) == "failed").ToList();
             var failed = failedSessions.Count;
             var failureRate = total > 0 ? (double)failed / total : 0.0;
+            if (total > 0 && failureRate >= criticalRate)
+            {
+                findings.Add(new Finding(Severity.Critical, $"session-type:{sessionType}",
+                    $"Session failure rate {failureRate:P0} is at or above the critical threshold {criticalRate:P0}"));
+            }
+            else if (total > 0 && failureRate >= warningRate)
+            {
+                findings.Add(new Finding(Severity.Warning, $"session-type:{sessionType}",
+                    $"Session failure rate {failureRate:P0} is at or above the warning threshold {warningRate:P0}"));
+            }
 
             // Per-policy latest-only
             var byPolicy = new Dictionary<string, List<Dictionary<string, object>>>();
@@ -304,6 +314,10 @@ public class WorkerHealthMonitor : IMonitor
 
         // --- 3. Retention session deep inspection ---
         var retentionSessions = categorized.GetValueOrDefault("retention", new List<Dictionary<string, object>>());
+        var maxRetentionFailures = thresholds.Get("retention_session_max_failures", 1);
+        if (maxRetentionFailures < 1) maxRetentionFailures = 1;
+        var failedRetentionCount = retentionSessions.Count(s => GetSessionState(s) == "failed");
+        var reportRetentionFailures = failedRetentionCount >= maxRetentionFailures;
         int subnetExhaustionCount = 0;
         double workerHealthInferred = 1.0;
         int retentionDeletedTotal = 0;
@@ -314,6 +328,9 @@ public class WorkerHealthMonitor : IMonitor
 
             if (status == "failed")
             {
+                if (!reportRetentionFailures)
+                    continue;
+
                 var errorText = GetErrorText(session, serverContext);
                 ErrorPattern? matched = null;
                 if (patternEngine != null)

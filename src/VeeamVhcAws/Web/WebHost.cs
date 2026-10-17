@@ -7,6 +7,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using VeeamVhcAws.Scheduling;
 using VeeamVhcAws.Web.Components;
 using VeeamVhcAws.Web.Services;
 using SerilogILogger = Serilog.ILogger;
@@ -17,9 +18,20 @@ public record WebHostOptions(string ConfigPath, string BindAddress, int Port);
 
 public static class WebHost
 {
+    /// <summary>Constant marker on every response so a second `ui` launch can recognise a running instance.</summary>
+    public const string IdentityHeader = "X-VHC-AWS-UI";
+    public const string IdentityHeaderValue = "1";
+
     private static readonly SerilogILogger Logger = Log.ForContext(typeof(WebHost));
 
-    public static async Task RunAsync(WebHostOptions options, AuthOptions auth, CancellationToken cancellationToken)
+    public static Task RunAsync(WebHostOptions options, AuthOptions auth, CancellationToken cancellationToken)
+    {
+        var app = Build(options, auth);
+        Logger.Information("Web UI listening on http://{Bind}:{Port}", options.BindAddress, options.Port);
+        return app.RunAsync(cancellationToken);
+    }
+
+    internal static WebApplication Build(WebHostOptions options, AuthOptions auth)
     {
         // Resolve the web root next to the exe rather than the current working directory.
         // The `ui` command is launched from arbitrary directories (e.g. a Downloads folder),
@@ -41,12 +53,20 @@ public static class WebHost
 
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(auth);
-        builder.Services.AddScoped<StateService>();
-        builder.Services.AddScoped<ConfigService>();
+        builder.Services.AddSingleton<StateService>();
+        builder.Services.AddSingleton(DailySummaryTasks.CreateDefault());
+        builder.Services.AddSingleton<ConfigService>();
         builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 
         var app = builder.Build();
 
+        // Runs before auth so 401 responses also carry the marker; it discloses nothing but "this is the VHC UI".
+        app.Use((context, next) =>
+        {
+            context.Response.Headers[IdentityHeader] = IdentityHeaderValue;
+            return next();
+        });
+        app.UseRouting();
         app.UseMiddleware<AuthMiddleware>();
         app.UseAntiforgery();
         app.UseStaticFiles();
@@ -59,15 +79,13 @@ public static class WebHost
         app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/api/state", (StateService s) => Results.Ok(s.Load()));
         app.MapGet("/api/config", (ConfigService c) => Results.Ok(c.Load()));
-        app.MapPost("/api/alerts/{key}/suppress", (string key, StateService s) =>
-            s.Suppress(key) ? Results.Ok() : Results.NotFound());
-        app.MapDelete("/api/alerts/{key}/suppress", (string key, StateService s) =>
-            s.Unsuppress(key) ? Results.Ok() : Results.NotFound());
+        // Suppress and unsuppress live only in the Blazor circuit (Alerts, Captures)
+        // and the `captures suppress` CLI. Do not add a state-changing minimal API
+        // here: UseAntiforgery does not reject a route that binds no form, so it
+        // would be open to cross-site POSTs on the default loopback launch.
 
         app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
-
-        Logger.Information("Web UI listening on http://{Bind}:{Port}", options.BindAddress, options.Port);
-        await app.RunAsync(cancellationToken);
+        return app;
     }
 
     // MapStaticAssets() development handler incorrectly resolves NuGet-sourced

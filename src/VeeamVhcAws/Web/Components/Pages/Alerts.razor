@@ -6,10 +6,11 @@
 <PageTitle>Alerts — Veeam VHC AWS</PageTitle>
 
 <h1>Alerts</h1>
+<p class="muted">Problems that are open right now. Suppress one you already know about to stop its notifications.</p>
 
 <div class="toolbar">
-    <label>Severity:
-        <select @bind="_severityFilter">
+    <label for="alerts-severity">Severity:
+        <select id="alerts-severity" @bind="SeverityFilter">
             <option value="">All</option>
             <option value="error">Error</option>
             <option value="critical">Critical</option>
@@ -17,8 +18,8 @@
             <option value="ok">OK</option>
         </select>
     </label>
-    <label>Server:
-        <select @bind="_serverFilter">
+    <label for="alerts-server">Server:
+        <select id="alerts-server" @bind="ServerFilter">
             <option value="">All</option>
             @foreach (var server in _servers)
             {
@@ -26,13 +27,21 @@
             }
         </select>
     </label>
-    <label>Search:
-        <input type="text" @bind="_searchFilter" @bind:event="oninput" placeholder="resource or message" />
+    <label for="alerts-search">Search:
+        <input id="alerts-search" type="text" @bind="SearchFilter" @bind:event="oninput" placeholder="resource or message" />
     </label>
-    <button class="btn" @onclick="Refresh">Refresh</button>
+    <button type="button" class="btn" @onclick="Refresh">Refresh</button>
 </div>
 
-@if (_filtered.Count == 0)
+@if (_snapshot is null)
+{
+    <p>Loading…</p>
+}
+else if (_snapshot.ActiveFindings.Count == 0)
+{
+    <p class="empty">No alerts yet.</p>
+}
+else if (_filtered.Count == 0)
 {
     <p class="empty">No alerts match the current filters.</p>
 }
@@ -65,11 +74,11 @@ else
                     <td>
                         @if (a.Suppressed)
                         {
-                            <button class="btn btn-small" @onclick="() => Unsuppress(a.Key)">Unsuppress</button>
+                            <button type="button" class="btn btn-small" @onclick="() => Unsuppress(a)">@AlertLabels.Action("Unsuppress", a, _filtered)</button>
                         }
                         else
                         {
-                            <button class="btn btn-small btn-warn" @onclick="() => Suppress(a.Key)">Suppress</button>
+                            <button type="button" class="btn btn-small btn-warn" @onclick="() => Suppress(a)">@AlertLabels.Action("Suppress", a, _filtered)</button>
                         }
                     </td>
                 </tr>
@@ -80,7 +89,7 @@ else
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -90,6 +99,24 @@ else
     private string _severityFilter = "";
     private string _serverFilter = "";
     private string _searchFilter = "";
+
+    private string SeverityFilter
+    {
+        get => _severityFilter;
+        set { _severityFilter = value ?? ""; ApplyFilters(); }
+    }
+
+    private string ServerFilter
+    {
+        get => _serverFilter;
+        set { _serverFilter = value ?? ""; ApplyFilters(); }
+    }
+
+    private string SearchFilter
+    {
+        get => _searchFilter;
+        set { _searchFilter = value ?? ""; ApplyFilters(); }
+    }
     private string? _flash;
     private Timer? _autoRefresh;
 
@@ -133,23 +160,25 @@ else
 
     protected override void OnParametersSet() => ApplyFilters();
 
-    private void Suppress(string key)
+    private void Suppress(AlertView alert)
     {
-        if (State.Suppress(key))
+        var subject = AlertLabels.Subject(alert);
+        if (State.Suppress(alert.Key))
         {
-            _flash = $"Suppressed {key[..8]}…";
+            _flash = $"Suppressed {subject}";
             Refresh();
         }
-        else _flash = $"Could not suppress {key[..8]} (not found in captured_errors)";
+        else _flash = $"Could not suppress {subject}. It is not in the current alerts or captures.";
     }
 
-    private void Unsuppress(string key)
+    private void Unsuppress(AlertView alert)
     {
-        if (State.Unsuppress(key))
+        var subject = AlertLabels.Subject(alert);
+        if (State.Unsuppress(alert.Key))
         {
-            _flash = $"Unsuppressed {key[..8]}…";
+            _flash = $"Unsuppressed {subject}";
             Refresh();
         }
-        else _flash = $"Could not unsuppress {key[..8]}";
+        else _flash = $"Could not unsuppress {subject}. It is not in the current alerts or captures.";
     }
 }

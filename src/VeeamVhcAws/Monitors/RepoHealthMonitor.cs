@@ -32,6 +32,8 @@ public class RepoHealthMonitor : IMonitor
         var thresholds = cfg.GetSection("thresholds");
         var warningPct = thresholds.Get("free_space_warning_pct", 15);
         var criticalPct = thresholds.Get("free_space_critical_pct", 5);
+        var includeExternal = cfg.Get("include_external_repos", true);
+        var checkExternalMaintenance = cfg.Get("check_external_maintenance", true);
         var client = serverContext.VbrClient!;
 
         // --- 1. Repository capacity check ---
@@ -55,7 +57,11 @@ public class RepoHealthMonitor : IMonitor
             var freeGb = repo.GetApiDouble("freeGB", "FreeGB", 0);
             var repoType = repo.GetApiString("type", "Type", "");
 
-            if (!string.IsNullOrEmpty(repoType) && repoType.Contains("external", StringComparison.OrdinalIgnoreCase))
+            var isExternal = !string.IsNullOrEmpty(repoType) &&
+                repoType.Contains("external", StringComparison.OrdinalIgnoreCase);
+            if (isExternal && !includeExternal)
+                continue;
+            if (isExternal)
                 hasExternalRepos = true;
 
             // Unreachable repo
@@ -157,6 +163,9 @@ public class RepoHealthMonitor : IMonitor
 
             if (!repoSessionTypes.Contains(sessionType))
                 continue;
+            if (!checkExternalMaintenance &&
+                sessionType is "externalmaintenance" or "externalmaintenancesession")
+                continue;
 
             var resultObj = session.GetApi("result", "Result", null);
             string resultStatus;
@@ -240,7 +249,7 @@ public class RepoHealthMonitor : IMonitor
                 sessionType, resultStatus, info.Count, info.ErrorText);
         }
 
-        if (sessions.Count == 0 && hasExternalRepos)
+        if (checkExternalMaintenance && sessions.Count == 0 && hasExternalRepos)
         {
             findings.Add(new Finding(Severity.Warning, "sessions",
                 "No sessions found in lookback window",

@@ -1,0 +1,21 @@
+@page "/help"
+@using VeeamVhcAws.Web.Services
+
+<PageTitle>Help — Veeam VHC AWS</PageTitle>
+
+<h1>Help</h1>
+<p class="muted">How to use VHC AWS. The same guide ships as docs/USER_GUIDE.md.</p>
+
+<nav class="guide-toc" aria-label="On this page">
+    <strong>On this page</strong>
+    <ul>
+        @foreach (var s in UserGuide.TopSections)
+        {
+            <li><a href="help#@s.Id">@s.Title</a></li>
+        }
+    </ul>
+</nav>
+
+<article class="guide">
+    @((MarkupString)UserGuide.Html)
+</article>

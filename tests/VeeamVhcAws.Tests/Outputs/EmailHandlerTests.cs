@@ -1,3 +1,4 @@
+using System.Reflection;
 using Xunit;
 using VeeamVhcAws.Core.Models;
 using VeeamVhcAws.Outputs;
@@ -64,6 +65,23 @@ public class EmailHandlerTests
     }
 
     // A summary with zero results at all is still a valid all-clear send.
+    [Fact]
+    public void AlertHtml_EncodesResourceAndMessage()
+    {
+        var handler = Handler("warning");
+        var result = new MonitorResult(MonitorType.RepoHealth, DateTime.UtcNow, 10, Severity.Critical,
+            new List<Finding> { new(Severity.Critical, "repo:<script>", "Workloads: a<b> & c") },
+            server: "s1");
+        var html = (string)typeof(EmailHandler)
+            .GetMethod("BuildHtml", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(handler, new object[] { new[] { result } })!;
+
+        Assert.Contains("repo:&lt;script&gt;", html);
+        Assert.Contains("<strong>a&lt;b&gt; &amp; c</strong>", html);
+        Assert.DoesNotContain("<script>", html);
+        Assert.DoesNotContain("<b>", html);
+    }
+
     [Fact]
     public void Summary_NoResults_StillSends()
     {

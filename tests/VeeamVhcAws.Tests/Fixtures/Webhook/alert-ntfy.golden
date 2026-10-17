@@ -1,0 +1,17 @@
+Content-Type: text/plain; charset=utf-8
+Title: veeam-vhc-aws: ERROR
+Priority: urgent
+Tags: x
+Markdown: yes
+**repo_health (vbr1)**
+- repo:Primary: Free space 8% is below the 10% threshold
+- repo:Archive: Backup failed for 12 workloads. Workloads: 12 items (\syn01\docker…)
+- ERROR: timeout talking to vbr1
+- ERROR: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+**worker_health (vbaws1)**
+- connection: Unable to connect to VBAWS
+
+OK: retention (vbr1)
+**Resolved:**
+- repo:Old: RESOLVED: free space back above threshold

@@ -29,7 +29,6 @@ public static class ConfigLoader
     {
         ["global"] = new Dictionary<string, object>
         {
-            ["log_level"] = "DEBUG",
             ["timeout_seconds"] = 30,
             ["session_timeout_seconds"] = 600,
             ["retry_count"] = 2,
@@ -52,7 +51,6 @@ public static class ConfigLoader
             {
                 ["free_space_warning_pct"] = 15,
                 ["free_space_critical_pct"] = 5,
-                ["rescan_on_unhealthy"] = true,
             },
             ["include_external_repos"] = true,
             ["check_external_maintenance"] = true,
@@ -100,6 +98,18 @@ public static class ConfigLoader
         return Path.GetFullPath(raw);
     }
 
+    public static string ResolveStateFile(string configPath)
+    {
+        var fullConfig = Path.GetFullPath(configPath);
+        var stateFile = "./veeam-vhc-aws-state.json";
+        if (File.Exists(fullConfig))
+            stateFile = LoadConfig(fullConfig).GetSection("global").Get("state_file", stateFile);
+        return AnchorPath(fullConfig, stateFile);
+    }
+
+    public static string AnchorPath(string configPath, string path) =>
+        ConfigPathJail.Resolve(configPath, path);
+
     public static Dictionary<string, object> LoadConfig(string path)
     {
         var deserializer = new DeserializerBuilder()
@@ -124,6 +134,7 @@ public static class ConfigLoader
                 $"(use single quotes or escape backslashes as \\\\).{line}", ex);
         }
 
+        LegacyEmailKeys.Migrate(raw);
         var config = DeepMerge(Defaults, raw);
         ApplyEnvServers(config);
         return config;
@@ -132,8 +143,10 @@ public static class ConfigLoader
     /// <summary>
     /// Normalizes bare backslashes in YAML double-quoted strings so that
     /// Windows paths and complex passwords don't require manual escaping.
-    /// YamlDotNet treats \u, \U, \x as Unicode/hex escapes; this doubles any
-    /// backslash that doesn't form a valid YAML escape sequence.
+    /// A drive or UNC path is rewritten with literal backslashes, because
+    /// YAML treats \P and \v as paragraph-separator and vertical-tab escapes
+    /// and would otherwise corrupt C:\ProgramData\...\veeam-vhc-aws.log.
+    /// Other double-quoted scalars still double only invalid YAML escapes.
     /// </summary>
     internal static string NormalizeBackslashes(string yaml)
     {
@@ -170,32 +183,42 @@ public static class ConfigLoader
             }
             else if (c == '"')
             {
-                // Double-quoted scalar: normalize invalid backslash escapes.
-                sb.Append(c);
-                i++;
-                while (i < yaml.Length && yaml[i] != '"')
+                var close = FindClosingDoubleQuote(yaml, i);
+                if (close > i && IsWindowsPathScalar(yaml, i + 1, close))
                 {
-                    if (yaml[i] == '\\' && i + 1 < yaml.Length)
+                    sb.Append('"');
+                    AppendLiteralBackslashes(sb, yaml, i + 1, close);
+                    sb.Append('"');
+                    i = close + 1;
+                }
+                else
+                {
+                    sb.Append(c);
+                    i++;
+                    while (i < yaml.Length && yaml[i] != '"')
                     {
-                        if (IsValidYamlEscape(yaml, i))
+                        if (yaml[i] == '\\' && i + 1 < yaml.Length)
                         {
-                            sb.Append(yaml[i++]);
-                            sb.Append(yaml[i++]);
+                            if (IsValidYamlEscape(yaml, i))
+                            {
+                                sb.Append(yaml[i++]);
+                                sb.Append(yaml[i++]);
+                            }
+                            else
+                            {
+                                sb.Append('\\');
+                                sb.Append('\\');
+                                i++;
+                            }
                         }
                         else
                         {
-                            sb.Append('\\');
-                            sb.Append('\\');
-                            i++;
+                            sb.Append(yaml[i++]);
                         }
                     }
-                    else
-                    {
+                    if (i < yaml.Length)
                         sb.Append(yaml[i++]);
-                    }
                 }
-                if (i < yaml.Length)
-                    sb.Append(yaml[i++]); // closing "
             }
             else
             {
@@ -204,6 +227,54 @@ public static class ConfigLoader
         }
 
         return sb.ToString();
+    }
+
+    private static int FindClosingDoubleQuote(string yaml, int openQuote)
+    {
+        var i = openQuote + 1;
+        while (i < yaml.Length)
+        {
+            if (yaml[i] == '"')
+            {
+                var slashes = 0;
+                var k = i - 1;
+                while (k > openQuote && yaml[k] == '\\')
+                {
+                    slashes++;
+                    k--;
+                }
+                if (slashes % 2 == 0)
+                    return i;
+            }
+            i++;
+        }
+        return -1;
+    }
+
+    private static bool IsWindowsPathScalar(string yaml, int start, int end)
+    {
+        var length = end - start;
+        if (length >= 3 && char.IsLetter(yaml[start]) && yaml[start + 1] == ':' && yaml[start + 2] == '\\')
+            return true;
+        return length >= 2 && yaml[start] == '\\' && yaml[start + 1] == '\\';
+    }
+
+    private static void AppendLiteralBackslashes(StringBuilder sb, string yaml, int start, int end)
+    {
+        var i = start;
+        while (i < end)
+        {
+            if (yaml[i] == '\\')
+            {
+                sb.Append('\\');
+                sb.Append('\\');
+                i += i + 1 < end && yaml[i + 1] == '\\' ? 2 : 1;
+            }
+            else
+            {
+                sb.Append(yaml[i++]);
+            }
+        }
     }
 
     private static bool IsValidYamlEscape(string s, int pos)
@@ -231,6 +302,12 @@ public static class ConfigLoader
         return true;
     }
 
+    /// <summary>
+    /// Overlays <paramref name="overlay"/> on <paramref name="baseDict"/>. Nested maps merge key by
+    /// key, including the <c>Dictionary&lt;object, object&gt;</c> maps YamlDotNet produces, so a
+    /// partial <c>global:</c> block fills the gaps from the defaults instead of replacing them.
+    /// An empty block (YAML null) over a default map keeps the defaults.
+    /// </summary>
     public static Dictionary<string, object> DeepMerge(
         Dictionary<string, object> baseDict,
         Dictionary<string, object> overlay)
@@ -239,18 +316,27 @@ public static class ConfigLoader
         foreach (var (key, value) in overlay)
         {
             if (result.TryGetValue(key, out var existing)
-                && existing is Dictionary<string, object> existingDict
-                && value is Dictionary<string, object> overlayDict)
+                && existing is Dictionary<string, object> existingDict)
             {
-                result[key] = DeepMerge(existingDict, overlayDict);
+                if (value is null)
+                    continue;
+                if (AsStringKeyedMap(value) is { } overlayDict)
+                {
+                    result[key] = DeepMerge(existingDict, overlayDict);
+                    continue;
+                }
             }
-            else
-            {
-                result[key] = value;
-            }
+            result[key] = value!;
         }
         return result;
     }
+
+    private static Dictionary<string, object>? AsStringKeyedMap(object value) => value switch
+    {
+        Dictionary<string, object> typed => typed,
+        Dictionary<object, object> raw => raw.ToDictionary(kv => kv.Key?.ToString() ?? "", kv => kv.Value),
+        _ => null,
+    };
 
     private static void ApplyEnvServers(Dictionary<string, object> config)
     {
