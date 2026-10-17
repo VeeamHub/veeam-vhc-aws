@@ -139,6 +139,22 @@ function Install-VhcAdminShortcuts {
     return $allOk
 }
 
+# Starts the exe once (`version`) and reports whether Windows let it run. Smart App
+# Control and WDAC refuse unsigned or unknown builds; PowerShell then surfaces a
+# misleading "StandardOutputEncoding" error, so callers print the real likely cause.
+function Test-VhcExeStarts {
+    param([Parameter(Mandatory=$true)][string]$ExePath)
+    try {
+        $out = (& $ExePath version 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) {
+            return [pscustomobject]@{ Ok = $false; Output = $out; Reason = "exited with code $LASTEXITCODE" }
+        }
+        return [pscustomobject]@{ Ok = $true; Output = $out; Reason = "" }
+    } catch {
+        return [pscustomobject]@{ Ok = $false; Output = ""; Reason = $_.Exception.Message }
+    }
+}
+
 function ConvertTo-ObfuscatedPassword {
     param([string]$Plaintext)
     if ([string]::IsNullOrEmpty($Plaintext)) { return $Plaintext }
@@ -254,287 +270,350 @@ if ($Upgrade) {
         exit 1
     }
 
-    # Stop tasks to release file lock on the exe (fixes #3)
+    # Prove the new exe can start BEFORE touching the install. If Windows blocks it
+    # (Smart App Control / WDAC on an unsigned build), stopping here leaves the
+    # current version and its scheduled tasks exactly as they were.
+    Unblock-File -Path $exeSource
+    $preflight = Test-VhcExeStarts -ExePath $exeSource
+    if (-not $preflight.Ok) {
+        Write-Host "ERROR: The new veeam-vhc-aws.exe could not start: $($preflight.Reason)" -ForegroundColor Red
+        Write-Host "  Nothing was changed. The installed version and its scheduled tasks are untouched." -ForegroundColor Yellow
+        Write-Host "  If Smart App Control or Windows Defender Application Control is on, Windows only runs" -ForegroundColor Yellow
+        Write-Host "  signed builds: use the signed zip from the GitHub release, not a local or CI artifact build." -ForegroundColor Yellow
+        Write-Host "  Details: Event Viewer > Applications and Services Logs > Microsoft > Windows > CodeIntegrity > Operational" -ForegroundColor DarkGray
+        exit 1
+    }
+
+    # The running admin UI holds a lock on the exe; replacing it would fail half-way.
+    $running = Get-Process -Name "veeam-vhc-aws" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and ([IO.Path]::GetFullPath($_.Path) -eq [IO.Path]::GetFullPath($exeDest)) }
+    if ($running) {
+        Write-Host "ERROR: veeam-vhc-aws is running from $InstallDir (PID $($running.Id -join ', '))." -ForegroundColor Red
+        Write-Host "  Close the admin UI console window, then run the upgrade again. Nothing was changed." -ForegroundColor Yellow
+        exit 1
+    }
+
+    # Stop tasks to release file lock on the exe (fixes #3). Remember which ones were
+    # enabled so the finally block below turns exactly those back on, even on failure.
     $taskNames = @("Veeam VHC AWS", "Veeam VHC AWS Daily Summary")
+    $tasksToReEnable = @()
     foreach ($tn in $taskNames) {
         $t = Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
-        if ($t -and $t.State -eq 'Running') {
+        if (-not $t) { continue }
+        if ($t.State -ne 'Disabled') { $tasksToReEnable += $tn }
+        if ($t.State -eq 'Running') {
             Stop-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue
             Write-Host "  -> Stopped running task '$tn'" -ForegroundColor Yellow
         }
         Disable-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue | Out-Null
     }
 
-    Write-Host "Replacing $exeDest ..." -ForegroundColor Yellow
-    Unblock-File -Path $exeSource
-    Copy-Item $exeSource $exeDest -Force
-    $newVersion = & $exeDest version 2>&1
-    Write-Host "  -> $newVersion" -ForegroundColor Green
+    $previousExe = "$exeDest.previous"
+    $wwwDest = Join-Path $InstallDir "wwwroot"
+    $previousWww = "$wwwDest.previous"
+    $swapped = $false
+    $upgradeSucceeded = $false
+    try {
+        Write-Host "Replacing $exeDest ..." -ForegroundColor Yellow
+        if (Test-Path $previousWww) { Remove-Item $previousWww -Recurse -Force }
+        if (Test-Path $exeDest) { Copy-Item $exeDest $previousExe -Force }
+        if (Test-Path $wwwDest) { Copy-Item $wwwDest $previousWww -Recurse -Force }
+        $swapped = $true
+        Copy-Item $exeSource $exeDest -Force
+        $installed = Test-VhcExeStarts -ExePath $exeDest
+        if (-not $installed.Ok) { throw "the installed exe could not start: $($installed.Reason)" }
+        Write-Host "  -> $($installed.Output)" -ForegroundColor Green
 
-    # Refresh the Blazor admin UI assets (wwwroot) so the `ui` GUI matches the new exe.
-    $wwwSource = Join-Path (Split-Path -Parent $exeSource) "wwwroot"
-    if (Test-Path $wwwSource) {
-        $wwwDest = Join-Path $InstallDir "wwwroot"
-        if (Test-Path $wwwDest) { Remove-Item $wwwDest -Recurse -Force }
-        Copy-Item $wwwSource $wwwDest -Recurse -Force
-        Write-Host "  -> Refreshed admin UI assets at $wwwDest" -ForegroundColor Green
-    }
-
-    # --- Feature gap detection ---
-    # HOW TO ADD A NEW FEATURE CHECK:
-    #   1. Add a detection block below (before the "Add future feature checks here" comment)
-    #   2. Use regex to check if the feature's key config line exists in $configText
-    #   3. Show [NEW] banner, explain the feature, prompt the user
-    #   4. For top-level sections: append to end of file
-    #   5. For sub-section options: use Insert-ConfigBlock to inject under parent section
-    #   6. Set $anyUpdates = $true if changes were made
-    #   7. Re-read $configText after modification so subsequent checks see updated content
-    Write-Host ""
-    Write-Host "Checking for new features..." -ForegroundColor Yellow
-
-    $configPath = Join-Path $InstallDir "veeam-vhc-aws.yaml"
-    $anyUpdates = $false
-
-    if (Test-Path $configPath) {
-        $configText = Get-Content $configPath -Raw -Encoding UTF8
-        $backupPath = $null
-        $dataDir = Join-Path $env:ProgramData "VHC"
-
-        # Helper: write config and create backup on first modification
-        function Save-Config {
-            param([string]$Content)
-            if (-not $backupPath) {
-                $script:backupPath = $configPath + "." + (Get-Date -Format "yyyyMMdd-HHmmss") + ".bak"
-                Copy-Item $configPath $script:backupPath -Force
-                Write-Host "  -> Config backed up to $script:backupPath" -ForegroundColor Green
-            }
-            [IO.File]::WriteAllText($configPath, $Content, [System.Text.UTF8Encoding]::new($false))
+        # Refresh the Blazor admin UI assets (wwwroot) so the `ui` GUI matches the new exe.
+        $wwwSource = Join-Path (Split-Path -Parent $exeSource) "wwwroot"
+        if (Test-Path $wwwSource) {
+            if (Test-Path $wwwDest) { Remove-Item $wwwDest -Recurse -Force }
+            Copy-Item $wwwSource $wwwDest -Recurse -Force
+            Write-Host "  -> Refreshed admin UI assets at $wwwDest" -ForegroundColor Green
         }
 
-        # Helper: insert a YAML block after the last line of a parent section.
-        # Finds the parent key (e.g. "retention:") and inserts $Block before the next
-        # top-level key (a line starting with a non-space, non-comment character followed by ":").
-        function Insert-ConfigBlock {
-            param([string]$ConfigText, [string]$ParentKey, [string]$Block)
-            # Find where the parent section starts
-            if ($ConfigText -notmatch "(?m)^${ParentKey}:") { return $ConfigText }
-            $parentIdx = $ConfigText.IndexOf("${ParentKey}:")
-            # Find the next top-level key after the parent
-            $afterParent = $ConfigText.Substring($parentIdx + $ParentKey.Length + 1)
-            if ($afterParent -match '(?m)^\r?\n[a-zA-Z_]') {
-                $nextKeyOffset = $afterParent.IndexOf($Matches[0])
-                $insertAt = $parentIdx + $ParentKey.Length + 1 + $nextKeyOffset
-                return $ConfigText.Substring(0, $insertAt) + "`r`n" + $Block + "`r`n" + $ConfigText.Substring($insertAt)
-            } else {
-                # Parent is last section -- append to end
-                return $ConfigText.TrimEnd() + "`r`n" + $Block + "`r`n"
-            }
-        }
+        # --- Feature gap detection ---
+        # HOW TO ADD A NEW FEATURE CHECK:
+        #   1. Add a detection block below (before the "Add future feature checks here" comment)
+        #   2. Use regex to check if the feature's key config line exists in $configText
+        #   3. Show [NEW] banner, explain the feature, prompt the user
+        #   4. For top-level sections: append to end of file
+        #   5. For sub-section options: use Insert-ConfigBlock to inject under parent section
+        #   6. Set $anyUpdates = $true if changes were made
+        #   7. Re-read $configText after modification so subsequent checks see updated content
+        Write-Host ""
+        Write-Host "Checking for new features..." -ForegroundColor Yellow
 
-        # ---- Feature: daily_summary ----
-        if ($configText -notmatch '(?m)^daily_summary:') {
-            Write-Host ""
-            Write-Host "  [NEW] Daily health summary is not configured." -ForegroundColor Cyan
-            Write-Host "        Sends a full status digest once per day (separate from alert notifications)." -ForegroundColor DarkGray
-            $dsChoice = Read-Host "  Set it up now? (y/n) [y]"
-            if ($dsChoice -ne "n") {
-                $dsTime = Read-Host "  Daily summary time (HH:MM, 24-hour local) [08:00]"
-                if (-not $dsTime) { $dsTime = "08:00" }
+        $configPath = Join-Path $InstallDir "veeam-vhc-aws.yaml"
+        $anyUpdates = $false
 
-                # Append daily_summary block to config
-                $dsBlock = "`r`n`r`ndaily_summary:`r`n  enabled: true`r`n"
-                $configText = $configText.TrimEnd() + $dsBlock
-                Save-Config $configText
-                Write-Host "  -> daily_summary added to config" -ForegroundColor Green
+        if (Test-Path $configPath) {
+            $configText = Get-Content $configPath -Raw -Encoding UTF8
+            $backupPath = $null
+            $dataDir = Join-Path $env:ProgramData "VHC"
 
-                $taskScript = Join-Path $PSScriptRoot "scripts\vhc-tasks.ps1"
-                & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
-                & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeDest -ConfigPath $configPath -Time $dsTime -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
-                Write-Host "  -> Scheduled task 'Veeam VHC AWS Daily Summary' created (daily at $dsTime)" -ForegroundColor Green
-                $anyUpdates = $true
-            } else {
-                Write-Host "  -> Skipped. Enable later by adding 'daily_summary:' to $configPath" -ForegroundColor DarkGray
-            }
-        } else {
-            Write-Host "  daily_summary: already configured" -ForegroundColor DarkGray
-        }
-
-        # ---- Feature: retention session failure detection ----
-        if ($configText -match '(?m)^retention:' -and $configText -notmatch 'session_lookback_hours') {
-            Write-Host ""
-            Write-Host "  [NEW] Retention session failure detection" -ForegroundColor Cyan
-            Write-Host "        Detects failed retention tasks like 'Cannot find full backup'" -ForegroundColor DarkGray
-            Write-Host "        and 'Failed to get last nas backup'. Reports all failures by" -ForegroundColor DarkGray
-            Write-Host "        default -- you can mute specific jobs or error messages." -ForegroundColor DarkGray
-            Write-Host ""
-            $rsChoice = Read-Host "  Enable retention session monitoring? (y/n) [y]"
-            if ($rsChoice -ne "n") {
-                $rsLookback = Read-Host "  Session lookback hours (how far back to scan) [48]"
-                if (-not $rsLookback) { $rsLookback = "48" }
-
-                $rsBlock = "  session_lookback_hours: $rsLookback"
-
-                # Prompt for jobs to exclude
-                Write-Host ""
-                Write-Host "  You can mute specific jobs that always fail and you don't care about." -ForegroundColor DarkGray
-                Write-Host "  Uses substring matching (e.g. 'Laptop Backups' matches 'PROD - Physical Laptop Backups')." -ForegroundColor DarkGray
-                $exJobs = Read-Host "  Job names to exclude (comma-separated, or blank to skip)"
-                if ($exJobs) {
-                    $rsBlock += "`r`n  exclude_jobs:"
-                    foreach ($job in ($exJobs -split ',')) {
-                        $job = $job.Trim()
-                        if ($job) { $rsBlock += "`r`n    - `"$job`"" }
-                    }
+            # Helper: write config and create backup on first modification
+            function Save-Config {
+                param([string]$Content)
+                if (-not $backupPath) {
+                    $script:backupPath = $configPath + "." + (Get-Date -Format "yyyyMMdd-HHmmss") + ".bak"
+                    Copy-Item $configPath $script:backupPath -Force
+                    Write-Host "  -> Config backed up to $script:backupPath" -ForegroundColor Green
                 }
+                [IO.File]::WriteAllText($configPath, $Content, [System.Text.UTF8Encoding]::new($false))
+            }
 
-                # Prompt for error patterns to exclude
-                Write-Host ""
-                Write-Host "  You can also mute specific error messages by pattern (regex)." -ForegroundColor DarkGray
-                Write-Host "  Example: 'Cannot find full backup' or 'Failed to get last nas backup'" -ForegroundColor DarkGray
-                $exErrors = Read-Host "  Error patterns to exclude (comma-separated, or blank to skip)"
-                if ($exErrors) {
-                    $rsBlock += "`r`n  exclude_session_errors:"
-                    foreach ($pat in ($exErrors -split ',')) {
-                        $pat = $pat.Trim()
-                        if ($pat) { $rsBlock += "`r`n    - `"$pat`"" }
-                    }
+            # Helper: insert a YAML block after the last line of a parent section.
+            # Finds the parent key (e.g. "retention:") and inserts $Block before the next
+            # top-level key (a line starting with a non-space, non-comment character followed by ":").
+            function Insert-ConfigBlock {
+                param([string]$ConfigText, [string]$ParentKey, [string]$Block)
+                # Find where the parent section starts
+                if ($ConfigText -notmatch "(?m)^${ParentKey}:") { return $ConfigText }
+                $parentIdx = $ConfigText.IndexOf("${ParentKey}:")
+                # Find the next top-level key after the parent
+                $afterParent = $ConfigText.Substring($parentIdx + $ParentKey.Length + 1)
+                if ($afterParent -match '(?m)^\r?\n[a-zA-Z_]') {
+                    $nextKeyOffset = $afterParent.IndexOf($Matches[0])
+                    $insertAt = $parentIdx + $ParentKey.Length + 1 + $nextKeyOffset
+                    return $ConfigText.Substring(0, $insertAt) + "`r`n" + $Block + "`r`n" + $ConfigText.Substring($insertAt)
+                } else {
+                    # Parent is last section -- append to end
+                    return $ConfigText.TrimEnd() + "`r`n" + $Block + "`r`n"
                 }
+            }
 
-                $configText = Insert-ConfigBlock $configText "retention" $rsBlock
-                Save-Config $configText
-                Write-Host "  -> Retention session monitoring added to config" -ForegroundColor Green
-                $anyUpdates = $true
-            } else {
-                Write-Host "  -> Skipped. Enable later by adding 'session_lookback_hours: 48' under retention: in $configPath" -ForegroundColor DarkGray
-            }
-        } else {
-            if ($configText -match 'session_lookback_hours') {
-                Write-Host "  retention session monitoring: already configured" -ForegroundColor DarkGray
-            }
-        }
-
-        # ---- Feature: log subfolder migration ----
-        if ($configText -match 'logging:' -and $configText -match '(?m)file:.*\\VHC\\veeam-vhc-aws' -and $configText -notmatch '\\logs\\') {
-            Write-Host ""
-            Write-Host "  [NEW] Log file organization" -ForegroundColor Cyan
-            Write-Host "        Moves log files into a dedicated logs\ subfolder under ProgramData\VHC\" -ForegroundColor DarkGray
-            $logChoice = Read-Host "  Migrate logs to VHC\logs\ subfolder? (y/n) [y]"
-            if ($logChoice -ne "n") {
-                $logDir = Join-Path $dataDir "logs"
-                Protect-VhcSystemDirectory $logDir
-                $configText = Set-LoggingPathToVhcLogs $configText $dataDir
-                Save-Config $configText
-                # Move existing log files
-                $existingLogs = Get-ChildItem -Path $dataDir -Filter "veeam-vhc-aws*.log" -ErrorAction SilentlyContinue
-                foreach ($log in $existingLogs) {
-                    try {
-                        Move-Item $log.FullName (Join-Path $logDir $log.Name) -Force -ErrorAction Stop
-                    } catch {
-                        Write-Host "  WARNING: Could not move $($log.Name) -- file may be in use" -ForegroundColor Yellow
-                    }
-                }
-                Write-Host "  -> Logs migrated to $logDir" -ForegroundColor Green
-                $anyUpdates = $true
-            } else {
-                Write-Host "  -> Skipped. Logs will remain in current location." -ForegroundColor DarkGray
-            }
-        } else {
-            if ($configText -match '\\logs\\') {
-                Write-Host "  log subfolder: already configured" -ForegroundColor DarkGray
-            }
-        }
-
-        # ---- Feature: API performance tuning (page_size, max_pages) ----
-        if ($configText -match '(?m)^global:' -and $configText -notmatch 'page_size') {
-            Write-Host ""
-            Write-Host "  [NEW] API performance tuning" -ForegroundColor Cyan
-            Write-Host "        Page size increased from 50 to 500 (10x fewer API calls)." -ForegroundColor DarkGray
-            Write-Host "        Circuit breaker added to prevent runaway pagination." -ForegroundColor DarkGray
-            Write-Host "        Adaptive lookback narrows session window after each success." -ForegroundColor DarkGray
-            Write-Host ""
-            $perfChoice = Read-Host "  Add page_size and max_pages to config? (y/n) [y]"
-            if ($perfChoice -ne "n") {
-                $perfBlock = "  page_size: 500`r`n  max_pages: 100"
-                $configText = Insert-ConfigBlock $configText "global" $perfBlock
-                Save-Config $configText
-                Write-Host "  -> page_size: 500 and max_pages: 100 added to global config" -ForegroundColor Green
-                $anyUpdates = $true
-            } else {
-                Write-Host "  -> Skipped. Defaults (page_size: 500, max_pages: 100) will be used." -ForegroundColor DarkGray
-            }
-        } else {
-            if ($configText -match 'page_size') {
-                Write-Host "  API performance tuning: already configured" -ForegroundColor DarkGray
-            }
-        }
-
-        # ---- Feature: data_directory ----
-        if ($configText -match '(?m)^global:' -and $configText -notmatch '(?m)^\s*data_directory:') {
-            $dataDirYaml = $dataDir -replace '\\', '/'
-            $configText = Insert-ConfigBlock $configText "global" "  data_directory: '$dataDirYaml'"
-            Save-Config $configText
-            Write-Host "  data_directory: added ($dataDir)" -ForegroundColor DarkGray
-            $anyUpdates = $true
-        }
-
-        # ---- Feature: session_timeout_seconds ----
-        if ($configText -match '(?m)^global:' -and $configText -notmatch 'session_timeout_seconds') {
-            $configText = Insert-ConfigBlock $configText "global" "  session_timeout_seconds: 600  # /api/v1/sessions timeout; raise for large deployments (e.g. 1200)"
-            Save-Config $configText
-            Write-Host "  session_timeout_seconds: added (default 600s)" -ForegroundColor DarkGray
-            $anyUpdates = $true
-        } else {
-            if ($configText -match 'session_timeout_seconds') {
-                Write-Host "  session_timeout_seconds: already configured" -ForegroundColor DarkGray
-            }
-        }
-
-        # ---- Feature: timeout_seconds check (recommend 30 if >60) ----
-        if ($configText -match '(?m)timeout_seconds:\s*(\d+)') {
-            $currentTimeout = [int]$Matches[1]
-            if ($currentTimeout -gt 60) {
+            # ---- Feature: daily_summary ----
+            if ($configText -notmatch '(?m)^daily_summary:') {
                 Write-Host ""
-                Write-Host "  [WARN] timeout_seconds is set to $currentTimeout" -ForegroundColor Yellow
-                Write-Host "         High timeout values (>60s) can cause multi-hour run times on busy" -ForegroundColor DarkGray
-                Write-Host "         VBR servers. With adaptive lookback and larger page sizes, a 30s" -ForegroundColor DarkGray
-                Write-Host "         timeout is recommended. Failed pages will be retried automatically." -ForegroundColor DarkGray
-                Write-Host ""
-                $toChoice = Read-Host "  Reduce timeout_seconds to 30? (y/n) [y]"
-                if ($toChoice -ne "n") {
-                    $configText = $configText -replace '(?m)(timeout_seconds:\s*)\d+', '${1}30'
+                Write-Host "  [NEW] Daily health summary is not configured." -ForegroundColor Cyan
+                Write-Host "        Sends a full status digest once per day (separate from alert notifications)." -ForegroundColor DarkGray
+                $dsChoice = Read-Host "  Set it up now? (y/n) [y]"
+                if ($dsChoice -ne "n") {
+                    $dsTime = Read-Host "  Daily summary time (HH:MM, 24-hour local) [08:00]"
+                    if (-not $dsTime) { $dsTime = "08:00" }
+
+                    # Append daily_summary block to config
+                    $dsBlock = "`r`n`r`ndaily_summary:`r`n  enabled: true`r`n"
+                    $configText = $configText.TrimEnd() + $dsBlock
                     Save-Config $configText
-                    Write-Host "  -> timeout_seconds set to 30" -ForegroundColor Green
+                    Write-Host "  -> daily_summary added to config" -ForegroundColor Green
+
+                    $taskScript = Join-Path $PSScriptRoot "scripts\vhc-tasks.ps1"
+                    & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
+                    & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeDest -ConfigPath $configPath -Time $dsTime -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
+                    Write-Host "  -> Scheduled task 'Veeam VHC AWS Daily Summary' created (daily at $dsTime)" -ForegroundColor Green
                     $anyUpdates = $true
                 } else {
-                    Write-Host "  -> Keeping timeout_seconds: $currentTimeout" -ForegroundColor DarkGray
+                    Write-Host "  -> Skipped. Enable later by adding 'daily_summary:' to $configPath" -ForegroundColor DarkGray
+                }
+            } else {
+                Write-Host "  daily_summary: already configured" -ForegroundColor DarkGray
+            }
+
+            # ---- Feature: retention session failure detection ----
+            if ($configText -match '(?m)^retention:' -and $configText -notmatch 'session_lookback_hours') {
+                Write-Host ""
+                Write-Host "  [NEW] Retention session failure detection" -ForegroundColor Cyan
+                Write-Host "        Detects failed retention tasks like 'Cannot find full backup'" -ForegroundColor DarkGray
+                Write-Host "        and 'Failed to get last nas backup'. Reports all failures by" -ForegroundColor DarkGray
+                Write-Host "        default -- you can mute specific jobs or error messages." -ForegroundColor DarkGray
+                Write-Host ""
+                $rsChoice = Read-Host "  Enable retention session monitoring? (y/n) [y]"
+                if ($rsChoice -ne "n") {
+                    $rsLookback = Read-Host "  Session lookback hours (how far back to scan) [48]"
+                    if (-not $rsLookback) { $rsLookback = "48" }
+
+                    $rsBlock = "  session_lookback_hours: $rsLookback"
+
+                    # Prompt for jobs to exclude
+                    Write-Host ""
+                    Write-Host "  You can mute specific jobs that always fail and you don't care about." -ForegroundColor DarkGray
+                    Write-Host "  Uses substring matching (e.g. 'Laptop Backups' matches 'PROD - Physical Laptop Backups')." -ForegroundColor DarkGray
+                    $exJobs = Read-Host "  Job names to exclude (comma-separated, or blank to skip)"
+                    if ($exJobs) {
+                        $rsBlock += "`r`n  exclude_jobs:"
+                        foreach ($job in ($exJobs -split ',')) {
+                            $job = $job.Trim()
+                            if ($job) { $rsBlock += "`r`n    - `"$job`"" }
+                        }
+                    }
+
+                    # Prompt for error patterns to exclude
+                    Write-Host ""
+                    Write-Host "  You can also mute specific error messages by pattern (regex)." -ForegroundColor DarkGray
+                    Write-Host "  Example: 'Cannot find full backup' or 'Failed to get last nas backup'" -ForegroundColor DarkGray
+                    $exErrors = Read-Host "  Error patterns to exclude (comma-separated, or blank to skip)"
+                    if ($exErrors) {
+                        $rsBlock += "`r`n  exclude_session_errors:"
+                        foreach ($pat in ($exErrors -split ',')) {
+                            $pat = $pat.Trim()
+                            if ($pat) { $rsBlock += "`r`n    - `"$pat`"" }
+                        }
+                    }
+
+                    $configText = Insert-ConfigBlock $configText "retention" $rsBlock
+                    Save-Config $configText
+                    Write-Host "  -> Retention session monitoring added to config" -ForegroundColor Green
+                    $anyUpdates = $true
+                } else {
+                    Write-Host "  -> Skipped. Enable later by adding 'session_lookback_hours: 48' under retention: in $configPath" -ForegroundColor DarkGray
+                }
+            } else {
+                if ($configText -match 'session_lookback_hours') {
+                    Write-Host "  retention session monitoring: already configured" -ForegroundColor DarkGray
                 }
             }
-        }
 
-        # ---- Feature: adaptive lookback overlap config ----
-        # Adaptive lookback is automatic (no config needed), but inform the user
-        if ($configText -notmatch 'lookback_overlap_minutes') {
-            Write-Host "  adaptive lookback: enabled automatically (2 min overlap)" -ForegroundColor DarkGray
+            # ---- Feature: log subfolder migration ----
+            if ($configText -match 'logging:' -and $configText -match '(?m)file:.*\\VHC\\veeam-vhc-aws' -and $configText -notmatch '\\logs\\') {
+                Write-Host ""
+                Write-Host "  [NEW] Log file organization" -ForegroundColor Cyan
+                Write-Host "        Moves log files into a dedicated logs\ subfolder under ProgramData\VHC\" -ForegroundColor DarkGray
+                $logChoice = Read-Host "  Migrate logs to VHC\logs\ subfolder? (y/n) [y]"
+                if ($logChoice -ne "n") {
+                    $logDir = Join-Path $dataDir "logs"
+                    Protect-VhcSystemDirectory $logDir
+                    $configText = Set-LoggingPathToVhcLogs $configText $dataDir
+                    Save-Config $configText
+                    # Move existing log files
+                    $existingLogs = Get-ChildItem -Path $dataDir -Filter "veeam-vhc-aws*.log" -ErrorAction SilentlyContinue
+                    foreach ($log in $existingLogs) {
+                        try {
+                            Move-Item $log.FullName (Join-Path $logDir $log.Name) -Force -ErrorAction Stop
+                        } catch {
+                            Write-Host "  WARNING: Could not move $($log.Name) -- file may be in use" -ForegroundColor Yellow
+                        }
+                    }
+                    Write-Host "  -> Logs migrated to $logDir" -ForegroundColor Green
+                    $anyUpdates = $true
+                } else {
+                    Write-Host "  -> Skipped. Logs will remain in current location." -ForegroundColor DarkGray
+                }
+            } else {
+                if ($configText -match '\\logs\\') {
+                    Write-Host "  log subfolder: already configured" -ForegroundColor DarkGray
+                }
+            }
+
+            # ---- Feature: API performance tuning (page_size, max_pages) ----
+            if ($configText -match '(?m)^global:' -and $configText -notmatch 'page_size') {
+                Write-Host ""
+                Write-Host "  [NEW] API performance tuning" -ForegroundColor Cyan
+                Write-Host "        Page size increased from 50 to 500 (10x fewer API calls)." -ForegroundColor DarkGray
+                Write-Host "        Circuit breaker added to prevent runaway pagination." -ForegroundColor DarkGray
+                Write-Host "        Adaptive lookback narrows session window after each success." -ForegroundColor DarkGray
+                Write-Host ""
+                $perfChoice = Read-Host "  Add page_size and max_pages to config? (y/n) [y]"
+                if ($perfChoice -ne "n") {
+                    $perfBlock = "  page_size: 500`r`n  max_pages: 100"
+                    $configText = Insert-ConfigBlock $configText "global" $perfBlock
+                    Save-Config $configText
+                    Write-Host "  -> page_size: 500 and max_pages: 100 added to global config" -ForegroundColor Green
+                    $anyUpdates = $true
+                } else {
+                    Write-Host "  -> Skipped. Defaults (page_size: 500, max_pages: 100) will be used." -ForegroundColor DarkGray
+                }
+            } else {
+                if ($configText -match 'page_size') {
+                    Write-Host "  API performance tuning: already configured" -ForegroundColor DarkGray
+                }
+            }
+
+            # ---- Feature: data_directory ----
+            if ($configText -match '(?m)^global:' -and $configText -notmatch '(?m)^\s*data_directory:') {
+                $dataDirYaml = $dataDir -replace '\\', '/'
+                $configText = Insert-ConfigBlock $configText "global" "  data_directory: '$dataDirYaml'"
+                Save-Config $configText
+                Write-Host "  data_directory: added ($dataDir)" -ForegroundColor DarkGray
+                $anyUpdates = $true
+            }
+
+            # ---- Feature: session_timeout_seconds ----
+            if ($configText -match '(?m)^global:' -and $configText -notmatch 'session_timeout_seconds') {
+                $configText = Insert-ConfigBlock $configText "global" "  session_timeout_seconds: 600  # /api/v1/sessions timeout; raise for large deployments (e.g. 1200)"
+                Save-Config $configText
+                Write-Host "  session_timeout_seconds: added (default 600s)" -ForegroundColor DarkGray
+                $anyUpdates = $true
+            } else {
+                if ($configText -match 'session_timeout_seconds') {
+                    Write-Host "  session_timeout_seconds: already configured" -ForegroundColor DarkGray
+                }
+            }
+
+            # ---- Feature: timeout_seconds check (recommend 30 if >60) ----
+            if ($configText -match '(?m)timeout_seconds:\s*(\d+)') {
+                $currentTimeout = [int]$Matches[1]
+                if ($currentTimeout -gt 60) {
+                    Write-Host ""
+                    Write-Host "  [WARN] timeout_seconds is set to $currentTimeout" -ForegroundColor Yellow
+                    Write-Host "         High timeout values (>60s) can cause multi-hour run times on busy" -ForegroundColor DarkGray
+                    Write-Host "         VBR servers. With adaptive lookback and larger page sizes, a 30s" -ForegroundColor DarkGray
+                    Write-Host "         timeout is recommended. Failed pages will be retried automatically." -ForegroundColor DarkGray
+                    Write-Host ""
+                    $toChoice = Read-Host "  Reduce timeout_seconds to 30? (y/n) [y]"
+                    if ($toChoice -ne "n") {
+                        $configText = $configText -replace '(?m)(timeout_seconds:\s*)\d+', '${1}30'
+                        Save-Config $configText
+                        Write-Host "  -> timeout_seconds set to 30" -ForegroundColor Green
+                        $anyUpdates = $true
+                    } else {
+                        Write-Host "  -> Keeping timeout_seconds: $currentTimeout" -ForegroundColor DarkGray
+                    }
+                }
+            }
+
+            # ---- Feature: adaptive lookback overlap config ----
+            # Adaptive lookback is automatic (no config needed), but inform the user
+            if ($configText -notmatch 'lookback_overlap_minutes') {
+                Write-Host "  adaptive lookback: enabled automatically (2 min overlap)" -ForegroundColor DarkGray
+            } else {
+                Write-Host "  adaptive lookback: already configured" -ForegroundColor DarkGray
+            }
+
+            # ---- Add future feature checks here ----
+
         } else {
-            Write-Host "  adaptive lookback: already configured" -ForegroundColor DarkGray
+            Write-Host "  Config not found at $configPath -- skipping feature check." -ForegroundColor Yellow
+            Write-Host "  Run setup.ps1 without -Upgrade to do a fresh install." -ForegroundColor Yellow
         }
 
-        # ---- Add future feature checks here ----
-
-    } else {
-        Write-Host "  Config not found at $configPath -- skipping feature check." -ForegroundColor Yellow
-        Write-Host "  Run setup.ps1 without -Upgrade to do a fresh install." -ForegroundColor Yellow
-    }
-
-    # Create/refresh the admin UI shortcut(s) so they track the new exe
-    $upgradeShortcutOk = $true
-    if (-not $NoShortcut) {
-        $upgradeShortcutOk = Install-VhcAdminShortcuts -ExePath $exeDest -ConfigPath $configPath -WorkingDirectory $InstallDir -IncludeDesktop ([bool]$DesktopShortcut)
-    }
-
-    # Re-enable tasks after upgrade
-    foreach ($tn in $taskNames) {
-        Enable-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue | Out-Null
+        # Create/refresh the admin UI shortcut(s) so they track the new exe
+        $upgradeShortcutOk = $true
+        if (-not $NoShortcut) {
+            $upgradeShortcutOk = Install-VhcAdminShortcuts -ExePath $exeDest -ConfigPath $configPath -WorkingDirectory $InstallDir -IncludeDesktop ([bool]$DesktopShortcut)
+        }
+        $upgradeSucceeded = $true
+    } catch {
+        Write-Host ""
+        Write-Host "ERROR: Upgrade failed: $($_.Exception.Message)" -ForegroundColor Red
+        if ($swapped) {
+            Write-Host "  Restoring the previous version..." -ForegroundColor Yellow
+            if (Test-Path $previousExe) { Copy-Item $previousExe $exeDest -Force }
+            if (Test-Path $previousWww) {
+                if (Test-Path $wwwDest) { Remove-Item $wwwDest -Recurse -Force }
+                Move-Item $previousWww $wwwDest
+            } elseif (Test-Path $wwwDest) {
+                Remove-Item $wwwDest -Recurse -Force
+            }
+            # Save-Config backs the config up before its first edit; put it back so the
+            # restored exe never reads keys added for the new version.
+            if ($script:backupPath -and (Test-Path $script:backupPath)) {
+                Copy-Item $script:backupPath $configPath -Force
+                Write-Host "  -> Config restored from $($script:backupPath)" -ForegroundColor Yellow
+            }
+            Write-Host "  -> Previous version restored." -ForegroundColor Yellow
+        }
+        exit 1
+    } finally {
+        # Runs on success, on failure, and on Ctrl+C: monitoring must never be left off.
+        foreach ($tn in $tasksToReEnable) {
+            Enable-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue | Out-Null
+        }
+        if ($upgradeSucceeded) {
+            Remove-Item $previousExe -Force -ErrorAction SilentlyContinue
+            Remove-Item $previousWww -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     Write-Host ""
