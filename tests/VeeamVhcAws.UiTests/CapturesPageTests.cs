@@ -9,7 +9,7 @@ public class CapturesPageTests
     public void Empty_SaysNoCapturedErrorsYet()
     {
         using var ui = new UiHarness();
-        var cut = ui.Context.RenderComponent<Captures>();
+        var cut = ui.Context.Render<Captures>();
 
         UiHarness.AssertEveryControlHasName(cut);
         Assert.Contains("No captured errors yet.", cut.Markup);
@@ -28,7 +28,7 @@ public class CapturesPageTests
               "suppressions": {}
             }
             """);
-        var cut = ui.Context.RenderComponent<Captures>();
+        var cut = ui.Context.Render<Captures>();
         Assert.Equal("abc", cut.Find("td.key").TextContent.Trim());
         UiHarness.Click(cut, "Suppress repo-disk");
         Assert.Contains("Suppressed repo-disk", cut.Markup);
@@ -51,7 +51,7 @@ public class CapturesPageTests
               "suppressions": {}
             }
             """);
-        var cut = ui.Context.RenderComponent<Captures>();
+        var cut = ui.Context.Render<Captures>();
         UiHarness.Click(cut, "Unsuppress repo-disk");
 
         Assert.Contains("Unsuppressed repo-disk", cut.Markup);

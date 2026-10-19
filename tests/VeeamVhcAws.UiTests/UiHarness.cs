@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Bunit;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using VeeamVhcAws.Scheduling;
 using VeeamVhcAws.Web;
@@ -14,7 +15,7 @@ sealed class UiHarness : IDisposable
     public string StatePath { get; }
     public ConfigService Config { get; }
     public StateService State { get; }
-    public TestContext Context { get; }
+    public BunitContext Context { get; }
 
     public UiHarness(string? stateJson = null, bool writeConfig = true, IDailySummaryTaskHost? tasks = null)
     {
@@ -30,7 +31,7 @@ sealed class UiHarness : IDisposable
         var options = new WebHostOptions(ConfigPath, "127.0.0.1", 0);
         Config = new ConfigService(options);
         State = new StateService(options);
-        Context = new TestContext();
+        Context = new BunitContext();
         Context.JSInterop.Mode = JSRuntimeMode.Loose;
         Context.Services.AddSingleton(options);
         Context.Services.AddSingleton(Config);
@@ -44,27 +45,27 @@ sealed class UiHarness : IDisposable
         Directory.Delete(Dir, recursive: true);
     }
 
-    public static void Click(IRenderedFragment cut, string name)
+    public static void Click(IRenderedComponent<IComponent> cut, string name)
     {
         var matches = cut.FindAll("button").Where(b => b.TextContent.Trim() == name).ToList();
         Assert.Single(matches);
         matches[0].Click();
     }
 
-    public static string LabelText(IRenderedFragment cut, string id)
+    public static string LabelText(IRenderedComponent<IComponent> cut, string id)
     {
         var label = cut.Find($"label[for='{id}']");
         return string.Join(" ", label.TextContent.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
-    public static void AssertNamed(IRenderedFragment cut, string id, string expectedLabel)
+    public static void AssertNamed(IRenderedComponent<IComponent> cut, string id, string expectedLabel)
     {
         var control = cut.Find("#" + id);
         Assert.Equal(id, control.Id);
         Assert.Equal(expectedLabel, LabelText(cut, id));
     }
 
-    public static void AssertEveryControlHasName(IRenderedFragment cut)
+    public static void AssertEveryControlHasName(IRenderedComponent<IComponent> cut)
     {
         var unnamed = new List<string>();
         foreach (var control in cut.FindAll("input, select, textarea"))
