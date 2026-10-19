@@ -92,6 +92,14 @@ public class UiPortDetectionTests
         Assert.Equal(UiCommand.PortState.Free, await UiCommand.DetectPortAsync(FreePort(), Timeout));
     }
 
+    [Fact]
+    public async Task UnusedPort_IsFree_EvenWhenRefusalIsSlowerThanTheTimeout()
+    {
+        // Windows takes ~2 s to refuse a loopback connect. A timeout shorter than the refusal
+        // must not turn a free port into "in use by another program".
+        Assert.Equal(UiCommand.PortState.Free, await UiCommand.DetectPortAsync(FreePort(), TimeSpan.FromTicks(1)));
+    }
+
     private static int FreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

@@ -1,6 +1,8 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Spectre.Console;
 using VeeamVhcAws.Core.Config;
@@ -139,6 +141,12 @@ public static class UiCommand
     /// </summary>
     internal static async Task<PortState> DetectPortAsync(int port, TimeSpan timeout)
     {
+        // Ask the OS before touching the network. Windows refuses a connect to a closed loopback
+        // port only after ~2 s of SYN retries, which outran the probe timeout and made every free
+        // port look occupied, so `ui` exited with "Port ... is already in use" on every launch.
+        if (!HasLoopbackReachableListener(port))
+            return PortState.Free;
+
         using (var tcp = new TcpClient())
         {
             using var connectCts = new CancellationTokenSource(timeout);
@@ -174,6 +182,22 @@ public static class UiCommand
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
         {
             return PortState.Foreign;
+        }
+    }
+
+    private static bool HasLoopbackReachableListener(int port)
+    {
+        try
+        {
+            return IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(e =>
+                e.Port == port
+                && (IPAddress.IsLoopback(e.Address)
+                    || e.Address.Equals(IPAddress.Any)
+                    || e.Address.Equals(IPAddress.IPv6Any)));
+        }
+        catch (Exception ex) when (ex is NetworkInformationException or PlatformNotSupportedException)
+        {
+            return true; // The OS can't say; let the network probe decide.
         }
     }
 
