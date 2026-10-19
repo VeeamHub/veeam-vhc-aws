@@ -147,7 +147,7 @@ public class WebhookPayloadTests
         }
         finally
         {
-            listener.Stop();
+            listener.StopQuietly();
         }
     }
 

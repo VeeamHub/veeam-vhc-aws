@@ -84,7 +84,7 @@ public class OutboundUrlDecisionTests
         }
         finally
         {
-            listener.Stop();
+            listener.StopQuietly();
             try { await serve; } catch (HttpListenerException) { }
         }
     }
@@ -117,7 +117,7 @@ public class OutboundUrlDecisionTests
         }
         finally
         {
-            listener.Stop();
+            listener.StopQuietly();
         }
     }
 

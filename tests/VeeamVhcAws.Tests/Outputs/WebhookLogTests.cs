@@ -67,7 +67,7 @@ public class WebhookLogTests
         }
         finally
         {
-            listener.Stop();
+            listener.StopQuietly();
         }
     }
 
