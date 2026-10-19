@@ -274,12 +274,17 @@ jobs:
             --title "veeam-vhc-aws $tag" `
             --generate-notes
 
+          # gh prints the body as an array of lines; join them, or "$current" collapses it onto one line.
+          $notes = (gh release view $tag --json body -q .body) -join "`n"
+          # One maintainer: drop GitHub's "by @user in <PR url>" on every line and the New Contributors list.
+          $notes = $notes -replace ' by @[\w-]+(\[bot\])? in https://github\.com/[^/\s]+/[^/\s]+/pull/(\d+)', ' (#$2)'
+          $notes = ($notes -replace '(?s)## New Contributors.*?(?=\*\*Full Changelog|\z)', '').Trim()
+
           $vtUrl = "${{ steps.virustotal.outputs.vt_url }}"
           $vtCount = "${{ steps.virustotal.outputs.malicious }}"
           if ($vtUrl) {
-            $current = gh release view $tag --json body -q .body
-            $notes = "$current`n`n**VirusTotal scan:** $vtUrl ($vtCount malicious detections)`n"
-            $notesFile = Join-Path $env:RUNNER_TEMP "release-notes.txt"
-            $notes | Out-File $notesFile -Encoding utf8
-            gh release edit $tag --notes-file $notesFile
+            $notes += "`n`n**VirusTotal scan:** $vtUrl ($vtCount malicious detections)"
           }
+          $notesFile = Join-Path $env:RUNNER_TEMP "release-notes.txt"
+          "$notes`n" | Out-File $notesFile -Encoding utf8
+          gh release edit $tag --notes-file $notesFile
