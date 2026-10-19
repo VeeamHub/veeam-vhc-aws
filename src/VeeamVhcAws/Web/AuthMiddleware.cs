@@ -40,10 +40,7 @@ public class AuthMiddleware
             return;
         }
 
-        // Allow Blazor static framework assets (JS/WASM) without auth.
-        // /_blazor (SignalR hub) is NOT bypassed — cookie auth is already set by the
-        // time the circuit connects, so the hub requests pass through IsAuthenticated normally.
-        if (path.StartsWith("/_framework", StringComparison.OrdinalIgnoreCase))
+        if (IsFrameworkAsset(context.Request.Method, path))
         {
             await _next(context);
             return;
@@ -83,13 +80,34 @@ public class AuthMiddleware
         return !string.IsNullOrEmpty(cookieToken) && TokensEqual(cookieToken, _options.Token);
     }
 
-    private static bool TokensEqual(string a, string b)
+    internal static bool IsFrameworkAsset(string method, string path)
     {
-        if (a.Length != b.Length) return false;
-        var aBytes = System.Text.Encoding.UTF8.GetBytes(a);
-        var bBytes = System.Text.Encoding.UTF8.GetBytes(b);
-        return CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
+        if (!HttpMethods.IsGet(method) && !HttpMethods.IsHead(method))
+            return false;
+        if (!path.StartsWith("/_framework/", StringComparison.OrdinalIgnoreCase))
+            return false;
+        var rest = path["/_framework/".Length..];
+        if (rest.Length == 0 || rest.Contains('/') || rest.Contains('\\') || rest.Contains("..", StringComparison.Ordinal))
+            return false;
+        var ext = Path.GetExtension(rest);
+        return ext.Equals(".js", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".css", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".wasm", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".json", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".map", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".dat", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".woff", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".woff2", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".gz", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".br", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".mjs", StringComparison.OrdinalIgnoreCase);
     }
+
+    internal static byte[] TokenDigest(string value) =>
+        SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value));
+
+    internal static bool TokensEqual(string a, string b) =>
+        CryptographicOperations.FixedTimeEquals(TokenDigest(a), TokenDigest(b));
 
     public static string GenerateToken()
     {

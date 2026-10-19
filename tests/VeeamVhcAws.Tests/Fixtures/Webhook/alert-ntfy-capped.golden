@@ -1,0 +1,22 @@
+Content-Type: text/plain; charset=utf-8
+Title: veeam-vhc-aws: WARNING
+Priority: default
+Tags: warning
+Markdown: yes
+**repo_health (vbr1)**
+- repo:R01: Finding 1
+- repo:R02: Finding 2
+- repo:R03: Finding 3
+- repo:R04: Finding 4
+- repo:R05: Finding 5
+- repo:R06: Finding 6
+- repo:R07: Finding 7
+- repo:R08: Finding 8
+- repo:R09: Finding 9
+- repo:R10: Finding 10
+- repo:R11: Finding 11
+- repo:R12: Finding 12
+- repo:R13: Finding 13
+- repo:R14: Finding 14
+- repo:R15: Finding 15
+- ... and 2 more

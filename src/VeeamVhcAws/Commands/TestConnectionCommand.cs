@@ -18,7 +18,7 @@ public static class TestConnectionCommand
         {
             var configPath = ConfigLoader.GetConfigPath(config);
             var cfg = ConfigLoader.LoadConfig(configPath);
-            LoggingSetup.Setup(cfg);
+            LoggingSetup.Setup(cfg, configPath);
             var servers = ServerContextBuilder.BuildAllServers(cfg);
             var outputConfigs = cfg.GetListOfSections("output");
 

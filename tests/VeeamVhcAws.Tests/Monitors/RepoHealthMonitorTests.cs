@@ -209,4 +209,50 @@ public class RepoHealthMonitorTests
         Assert.Contains(result.Findings, f =>
             f.Message.Contains("no sessions found", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public void IncludeExternalReposFalse_SkipsTheExternalRepository()
+    {
+        var client = Substitute.For<IVbrClient>();
+        client.GetRepositoryStates().Returns(new List<Dictionary<string, object>>
+        {
+            new() { ["name"] = "Local-Repo", ["type"] = "WinLocal", ["capacityGB"] = (long)1000, ["freeGB"] = (long)500 },
+            new() { ["name"] = "External-Repo", ["type"] = "ExternalS3", ["capacityGB"] = (long)200, ["freeGB"] = (long)5 },
+        });
+        client.GetSessions(Arg.Any<int>()).Returns(new List<Dictionary<string, object>>());
+        client.GetScaleoutRepositories().Returns(new List<Dictionary<string, object>>());
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RepoHealthMonitor(DefaultConfig(new()
+        {
+            ["include_external_repos"] = false,
+            ["check_external_maintenance"] = false,
+        }));
+        var result = monitor.Run(ctx, new PatternEngine(new List<ErrorPattern>()));
+
+        Assert.Equal(Severity.Ok, result.OverallSeverity);
+        Assert.Contains(result.Findings, f => f.Resource == "repo:Local-Repo" && f.Severity == Severity.Ok && f.MetricName == null);
+        Assert.DoesNotContain(result.Findings, f => f.Resource == "repo:External-Repo");
+    }
+
+    [Fact]
+    public void CheckExternalMaintenanceFalse_IgnoresExternalMaintenanceSessions()
+    {
+        var sessions = LoadFixture("sessions_external_maintenance.json");
+        var client = Substitute.For<IVbrClient>();
+        client.GetRepositoryStates().Returns(new List<Dictionary<string, object>>
+        {
+            new() { ["name"] = "S3-Repo", ["type"] = "ExternalS3", ["capacityGB"] = (long)5000, ["freeGB"] = (long)4000 }
+        });
+        client.GetSessions(Arg.Any<int>()).Returns(sessions);
+        client.GetScaleoutRepositories().Returns(new List<Dictionary<string, object>>());
+
+        var ctx = new ServerContext("test-server", "vbr", VbrClient: client);
+        var monitor = new RepoHealthMonitor(DefaultConfig(new() { ["check_external_maintenance"] = false }));
+        var result = monitor.Run(ctx, CredentialEngine());
+
+        Assert.Equal(Severity.Ok, result.OverallSeverity);
+        Assert.DoesNotContain(result.Findings, f =>
+            f.Severity == Severity.Critical && f.Message.Contains("Credential failure", StringComparison.Ordinal));
+    }
 }

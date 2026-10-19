@@ -1,6 +1,7 @@
 using System.Text.Json;
 using VeeamVhcAws.Core.Config;
 using VeeamVhcAws.Core.Models;
+using VeeamVhcAws.Core.State;
 
 namespace VeeamVhcAws.Web.Services;
 
@@ -28,11 +29,7 @@ public class StateService
 
     public StateService(WebHostOptions options)
     {
-        var cfg = File.Exists(options.ConfigPath)
-            ? ConfigLoader.LoadConfig(options.ConfigPath)
-            : new Dictionary<string, object>();
-        var global = cfg.GetSection("global");
-        _statePath = Path.GetFullPath(global.Get("state_file", "./veeam-vhc-aws-state.json"));
+        _statePath = ConfigLoader.ResolveStateFile(options.ConfigPath);
     }
 
     public string StateFilePath => _statePath;
@@ -50,9 +47,19 @@ public class StateService
 
     public bool Suppress(string key)
     {
+        lock (StateFile.Gate(_statePath))
+        {
+            using var hold = StateFile.Acquire(_statePath);
+            return SuppressUnlocked(key);
+        }
+    }
+
+    private bool SuppressUnlocked(string key)
+    {
         var root = LoadRoot();
         var captured = AsDict(root.GetValueOrDefault("captured_errors"));
-        if (!captured.ContainsKey(key)) return false;
+        var findings = AsDict(root.GetValueOrDefault("findings"));
+        if (!captured.ContainsKey(key) && !findings.ContainsKey(key)) return false;
 
         var suppressions = AsDict(root.GetValueOrDefault("suppressions"));
         suppressions[key] = new Dictionary<string, object>
@@ -60,16 +67,33 @@ public class StateService
             ["suppressed_at"] = DateTime.UtcNow.ToString("o"),
         };
         root["suppressions"] = suppressions;
+        if (Suppression.MarkCaptured(captured, key, suppressed: true))
+            root["captured_errors"] = captured;
         Save(root);
         return true;
     }
 
     public bool Unsuppress(string key)
     {
+        lock (StateFile.Gate(_statePath))
+        {
+            using var hold = StateFile.Acquire(_statePath);
+            return UnsuppressUnlocked(key);
+        }
+    }
+
+    private bool UnsuppressUnlocked(string key)
+    {
         var root = LoadRoot();
         var suppressions = AsDict(root.GetValueOrDefault("suppressions"));
-        if (!suppressions.Remove(key)) return false;
+        var removed = suppressions.Remove(key);
+        var captured = AsDict(root.GetValueOrDefault("captured_errors"));
+        var cleared = Suppression.MarkCaptured(captured, key, suppressed: false);
+        if (!removed && !cleared) return false;
+
         root["suppressions"] = suppressions;
+        if (cleared)
+            root["captured_errors"] = captured;
         Save(root);
         return true;
     }
@@ -91,7 +115,7 @@ public class StateService
     private void Save(Dictionary<string, object> root)
     {
         var json = JsonSerializer.Serialize(root, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_statePath, json);
+        StateFile.WriteAtomic(_statePath, json);
     }
 
     private static Dictionary<string, object> Deserialize(JsonElement el)
@@ -138,8 +162,7 @@ public class StateService
                 int i => (double)i,
                 _ => 1.0,
             };
-            var suppressedFlag = entry.GetValueOrDefault("suppressed") is true;
-            var suppressed = suppressedFlag || suppressions.ContainsKey(key);
+            var suppressed = Suppression.IsSuppressed(key, entry, suppressions);
 
             results.Add(new AlertView(key, sev, server, monitor, resource, message, firstSeen, lastSeen, count, suppressed));
         }
@@ -164,7 +187,7 @@ public class StateService
     }
 
     private static DateTime? TryParseDate(object? value) =>
-        value is string s && DateTime.TryParse(s, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt)
+        value is string s && !string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt)
             ? dt
             : null;
 

@@ -130,7 +130,7 @@ servers:
     username: DOMAIN\\backupadmin
     password: """"
     api_version: ""1.3-rev1""
-    verify_ssl: false
+    verify_ssl: true  # set false only for a lab with a self-signed certificate
 
   # Uncomment for VBAWS:
   # - name: my-vbaws
@@ -138,7 +138,7 @@ servers:
   #   url: https://vbaws-appliance
   #   username: admin
   #   password: """"
-  #   verify_ssl: false
+  #   verify_ssl: true
 
 output:
   - type: json_stdout

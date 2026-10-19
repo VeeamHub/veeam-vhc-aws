@@ -163,6 +163,7 @@ h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
 }
 
 .brand-wordmark {
+    white-space: nowrap;
     font-weight: 700;
     font-size: 1.0625rem;
     letter-spacing: -0.005em;
@@ -251,6 +252,12 @@ h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
     background: var(--sev-crit-bg);
     color: var(--sev-crit-fg);
     border: 1px solid var(--sev-crit-fg);
+}
+
+.status-banner.pending {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
 }
 
 /* Card grid */
@@ -460,6 +467,7 @@ h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
 
 .form-row input[type=text],
 .form-row input[type=password],
+.form-row input[type=number],
 .form-row select {
     background: var(--bg-elev);
     color: var(--text);
@@ -472,14 +480,31 @@ h3 { font-size: 1rem; margin: 0 0 0.5rem; font-weight: 600; }
 
 .form-row input[type=text]:focus,
 .form-row input[type=password]:focus,
+.form-row input[type=number]:focus,
 .form-row select:focus {
     outline: none;
     border-color: var(--accent);
 }
 
-.form-row input[type=text]:disabled {
+.form-row input[type=text]:disabled,
+.form-row input[type=password]:disabled,
+.form-row input[type=number]:disabled,
+.form-row select:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+fieldset.form-row {
+    border: 0;
+    padding: 0;
+    margin: 0 0 1rem;
+    min-inline-size: 0;
+}
+
+fieldset.form-row > legend {
+    font-weight: 500;
+    padding: 0;
+    margin-bottom: 0.35rem;
 }
 
 .radio-group {
@@ -650,3 +675,43 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .big-number { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--text-strong); }
 .card.card-crit .big-number { color: var(--sev-crit-fg); }
 .card.card-warn .big-number { color: var(--sev-warn-fg); }
+
+/* Getting-started checklist (Dashboard) */
+.getting-started { margin-bottom: 1.5rem; }
+.getting-started-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem; }
+.getting-started-head h2 { margin: 0; font-size: 1.1rem; }
+.checklist { list-style: none; margin: 0; padding: 0; }
+.checklist li { display: flex; gap: 0.75rem; padding: 0.6rem 0.75rem; border-radius: var(--radius-md); border-left: 3px solid transparent; }
+.checklist li p { margin: 0.15rem 0 0; font-size: 0.9rem; }
+.checklist .check { width: 1.25rem; text-align: center; color: var(--text-muted); }
+.checklist li.done { color: var(--text-muted); }
+.checklist li.done .check { color: var(--sev-ok-fg); }
+.checklist li.next { background: var(--brand-soft); border-left-color: var(--brand); }
+.checklist li.next .check { color: var(--brand); }
+
+/* Help page: rendered docs/USER_GUIDE.md */
+.guide { max-width: 75ch; line-height: 1.6; }
+.guide h2 { margin-top: 2rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); }
+.guide h3 { margin-top: 1.5rem; }
+.guide code { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-sunken); padding: 0.1em 0.35em; border-radius: var(--radius-sm); }
+/* Wrap long commands: macOS hides scrollbars, so a scrolling box reads as cut off. */
+.guide pre { background: var(--bg-sunken); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.75rem 1rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.guide-toc { max-width: 75ch; margin: 0 0 1.5rem; padding: 0.75rem 1rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.guide-toc strong { display: block; margin-bottom: 0.35rem; font-size: 0.9rem; }
+.guide-toc ul { margin: 0; padding-left: 1.1rem; columns: 2; column-gap: 2rem; }
+.guide-toc li { margin: 0.15rem 0; }
+
+/* Focus moves to the page heading on navigation (FocusOnNavigate); it is not an interactive control. */
+h1:focus { outline: none; }
+
+@media (max-width: 860px) {
+    .app-header { gap: 1rem; padding: 0 1rem; }
+    .brand-tagline { display: none; }
+    .top-nav a { padding: 0 0.6rem; }
+    .guide-toc ul { columns: 1; }
+}
+.guide pre code { background: none; padding: 0; }
+.guide table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+.guide th, .guide td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+.guide th { background: var(--bg-elev); }
+.guide blockquote { margin: 1rem 0; padding: 0.25rem 1rem; border-left: 4px solid var(--accent); background: var(--bg-card); }

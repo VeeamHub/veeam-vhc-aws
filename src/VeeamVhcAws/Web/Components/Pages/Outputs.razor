@@ -1,15 +1,24 @@
 @page "/outputs"
 @rendermode InteractiveServer
+@using VeeamVhcAws.Core.Output
 @inject ConfigService Config
 
 <PageTitle>Outputs — Veeam VHC AWS</PageTitle>
 
 <div class="page-header">
     <h1>Output Handlers</h1>
-    <button class="btn" @onclick="AddOutput">+ Add Output</button>
+    @if (_cfg is not null && _cfg.Outputs.Count > 0)
+    {
+        <button type="button" class="btn" @onclick="AddOutput">+ Add Output</button>
+    }
 </div>
 
-<p class="muted">Notification channels for monitor findings. Multiple handlers can be configured — all fire on every run.</p>
+<p class="muted">Where alerts are sent. Webhooks and email send only when something is new or resolved.</p>
+
+@if (_cfg is not null && StdoutOnlyOutput.IsOnly(_cfg.Outputs.Select(o => o.Type)))
+{
+    <p class="notice" role="status">@StdoutOnlyOutput.Warning</p>
+}
 
 @if (_cfg is null)
 {
@@ -19,7 +28,7 @@ else if (_cfg.Outputs.Count == 0)
 {
     <div class="empty">
         <p>No output handlers configured.</p>
-        <button class="btn" @onclick="AddOutput">+ Add Your First Handler</button>
+        <button type="button" class="btn" @onclick="AddOutput">+ Add Your First Handler</button>
     </div>
 }
 else
@@ -40,8 +49,8 @@ else
                     <td>@(o.Fields.GetValueOrDefault("min_severity") as string ?? "—")</td>
                     <td class="muted">@FormatRemaining(o)</td>
                     <td>
-                        <button class="btn btn-small" @onclick="() => EditOutput(idx)">Edit</button>
-                        <button class="btn btn-small btn-warn" @onclick="() => ConfirmDelete(idx)">Delete</button>
+                        <button type="button" class="btn btn-small" @onclick="() => EditOutput(idx)">Edit @($"{o.Type} {idx + 1}")</button>
+                        <button type="button" class="btn btn-small btn-warn" @onclick="() => ConfirmDelete(idx)">Delete @($"{o.Type} {idx + 1}")</button>
                     </td>
                 </tr>
             }
@@ -54,23 +63,16 @@ else
     <OutputForm Model="_editing" IsNew="_isNew" OnSave="SaveOutput" OnCancel="CancelEdit" />
 }
 
-@if (_confirmingDeleteIdx is not null)
+@if (_confirmingDeleteIdx is not null && _cfg is not null)
 {
-    <div class="modal-overlay" @onclick="() => _confirmingDeleteIdx = null">
-        <div class="modal" @onclick:stopPropagation="true">
-            <h2>Delete output handler?</h2>
-            <p>Remove handler #@(_confirmingDeleteIdx + 1) (<strong>@_cfg!.Outputs[_confirmingDeleteIdx.Value].Type</strong>)?</p>
-            <div class="form-actions">
-                <button class="btn-secondary" @onclick="() => _confirmingDeleteIdx = null">Cancel</button>
-                <button class="btn btn-warn" @onclick="ConfirmDeleteAction">Delete</button>
-            </div>
-        </div>
-    </div>
+    <ConfirmDialog Title="Delete output handler?" OnConfirm="ConfirmDeleteAction" OnCancel="CancelDelete">
+        <p>Remove handler #@(_confirmingDeleteIdx + 1) (<strong>@_cfg.Outputs[_confirmingDeleteIdx.Value].Type</strong>)?</p>
+    </ConfirmDialog>
 }
 
 @if (!string.IsNullOrEmpty(_flash))
 {
-    <div class="flash">@_flash</div>
+    <div class="flash" role="status">@_flash</div>
 }
 
 @code {
@@ -86,6 +88,7 @@ else
 
     private void AddOutput()
     {
+        _confirmingDeleteIdx = null;
         _editing = new OutputView("webhook", new());
         _editingIdx = null;
         _isNew = true;
@@ -108,12 +111,12 @@ else
     private void SaveOutput(OutputEdit edit)
     {
         if (_cfg is null) return;
-        var outputs = _cfg.Outputs.Select(o => new OutputEdit(o.Type, new Dictionary<string, object?>(o.Fields), new HashSet<string>())).ToList();
+        var outputs = _cfg.Outputs.Select(EditFrom).ToList();
 
         if (_isNew)
             outputs.Add(edit);
         else if (_editingIdx is int idx && idx >= 0 && idx < outputs.Count)
-            outputs[idx] = edit;
+            outputs[idx] = edit with { Id = _cfg.Outputs[idx].Id };
 
         Config.SaveOutputs(outputs);
         _flash = _isNew ? "Output handler added" : "Output handler updated";
@@ -122,7 +125,14 @@ else
         Refresh();
     }
 
-    private void ConfirmDelete(int idx) => _confirmingDeleteIdx = idx;
+    private void ConfirmDelete(int idx)
+    {
+        _editing = null;
+        _editingIdx = null;
+        _confirmingDeleteIdx = idx;
+    }
+
+    private void CancelDelete() => _confirmingDeleteIdx = null;
 
     private void ConfirmDeleteAction()
     {
@@ -131,7 +141,7 @@ else
         var outputs = _cfg.Outputs
             .Select((o, i) => new { o, i })
             .Where(x => x.i != deleteIdx)
-            .Select(x => new OutputEdit(x.o.Type, new Dictionary<string, object?>(x.o.Fields), new HashSet<string>()))
+            .Select(x => EditFrom(x.o))
             .ToList();
 
         Config.SaveOutputs(outputs);
@@ -139,6 +149,9 @@ else
         _confirmingDeleteIdx = null;
         Refresh();
     }
+
+    private static OutputEdit EditFrom(OutputView o) =>
+        new(o.Type, new Dictionary<string, object?>(o.Fields), new HashSet<string>(), o.Id);
 
     private static string PrimaryTarget(OutputView o) => o.Type switch
     {
@@ -154,5 +167,5 @@ else
     private static string FormatRemaining(OutputView o) =>
         string.Join(", ", o.Fields
             .Where(kv => kv.Key != "min_severity" && kv.Key != "url" && kv.Key != "path" && kv.Key != "smtp_host" && kv.Key != "smtp_port" && kv.Value != null)
-            .Select(kv => $"{kv.Key}={kv.Value}"));
+            .Select(kv => $"{kv.Key}={OutputFieldText.Format(kv.Value)}"));
 }

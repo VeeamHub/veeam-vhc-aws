@@ -14,6 +14,7 @@ public class FindingState
     private readonly string _path;
     private readonly List<string> _configSuppressions;
     private Dictionary<string, object> _state;
+    private bool _unreadable;
 
     public FindingState(string stateFile = "./veeam-vhc-aws-state.json", List<string>? configSuppressions = null)
     {
@@ -51,6 +52,7 @@ public class FindingState
         }
         catch (Exception e)
         {
+            _unreadable = true;
             Logger.Warning("Could not load state file {Path}: {Error}", _path, e.Message);
             return new Dictionary<string, object>
             {
@@ -60,6 +62,12 @@ public class FindingState
                 ["last_run"] = null!,
             };
         }
+    }
+
+    private void Reload()
+    {
+        _unreadable = false;
+        _state = Load();
     }
 
     private static Dictionary<string, object> DeserializeState(JsonElement element)
@@ -82,15 +90,14 @@ public class FindingState
 
     private void Save()
     {
+        if (_unreadable)
+            return;
+
         try
         {
-            var dir = Path.GetDirectoryName(Path.GetFullPath(_path));
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(_state, options);
-            File.WriteAllText(_path, json);
+            StateFile.WriteAtomic(_path, json);
         }
         catch (Exception e)
         {
@@ -150,17 +157,35 @@ public class FindingState
 
     public void SetLastSuccessTime(string server, string monitor, DateTime time)
     {
-        var lastSuccess = GetLastSuccess();
-        var key = $"{server}:{monitor}";
-        lastSuccess[key] = time.ToUniversalTime().ToString("O");
-        Save();
+        lock (StateFile.Gate(_path))
+        {
+            using var hold = StateFile.Acquire(_path);
+            Reload();
+            if (_unreadable)
+                return;
+            var lastSuccess = GetLastSuccess();
+            var key = $"{server}:{monitor}";
+            lastSuccess[key] = time.ToUniversalTime().ToString("O");
+            Save();
+        }
     }
 
     public (List<MonitorResult> FilteredResults, List<Finding> Resolved) ProcessResults(List<MonitorResult> results)
     {
+        lock (StateFile.Gate(_path))
+        {
+            using var hold = StateFile.Acquire(_path);
+            Reload();
+            return ProcessLoaded(results);
+        }
+    }
+
+    private (List<MonitorResult> FilteredResults, List<Finding> Resolved) ProcessLoaded(List<MonitorResult> results)
+    {
         var now = DateTime.UtcNow.ToString("O");
         var currentKeys = new HashSet<string>();
         var newFindingsByResult = new Dictionary<int, List<Finding>>();
+        var hasSuppressed = new bool[results.Count];
         var resolved = new List<Finding>();
         var findings = GetFindings();
         var capturedErrors = GetCapturedErrors();
@@ -219,6 +244,7 @@ public class FindingState
                         ["_suppressed"] = true
                     };
                     Logger.Debug("Suppressed finding: {Resource} — {Message}", finding.Resource, finding.Message);
+                    hasSuppressed[i] = true;
                     continue;
                 }
 
@@ -307,6 +333,10 @@ public class FindingState
         for (int i = 0; i < results.Count; i++)
         {
             var r = results[i];
+            // A suppressed finding no longer drives severity. Recompute it on the caller's result
+            // too, so outputs and the exit code agree with what is left after suppression.
+            if (hasSuppressed[i])
+                r.OverallSeverity = SeverityAfterSuppression(r);
             filteredResults.Add(new MonitorResult(
                 monitor: r.Monitor,
                 timestamp: r.Timestamp,
@@ -323,5 +353,22 @@ public class FindingState
         Save();
 
         return (filteredResults, resolved);
+    }
+
+    internal static bool IsSuppressed(Finding finding) =>
+        finding.Details.TryGetValue("_suppressed", out var flag) && flag is true;
+
+    // Worst severity among the findings that were not suppressed. Monitor errors are not
+    // findings and cannot be suppressed, so a result that reported errors stays at least Warning,
+    // the same floor MonitorRunner applies.
+    private static Severity SeverityAfterSuppression(MonitorResult result)
+    {
+        var worst = result.Errors.Count > 0 ? Severity.Warning : Severity.Ok;
+        foreach (var f in result.Findings)
+        {
+            if (!IsSuppressed(f) && f.Severity.Rank() > worst.Rank())
+                worst = f.Severity;
+        }
+        return worst;
     }
 }

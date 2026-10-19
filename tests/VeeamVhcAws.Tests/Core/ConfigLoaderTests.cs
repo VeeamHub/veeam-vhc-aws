@@ -96,9 +96,6 @@ public class ConfigLoaderTests
     [Theory]
     [InlineData(@"username: ""DOMAIN\Username""", @"username: ""DOMAIN\\Username""")]
     [InlineData(@"password: ""P@ss\word!""", @"password: ""P@ss\\word!""")]
-    // \U (Users) and \D (Desktop) are invalid YAML escapes → doubled.
-    // \a (adam) IS a valid YAML escape (bell char) → left as-is per spec.
-    [InlineData("path: \"C:\\Users\\adam\\Desktop\"", "path: \"C:\\\\Users\\adam\\\\Desktop\"")]
     public void NormalizeBackslashes_EscapesBareBackslashInDoubleQuoted(string input, string expected)
     {
         var result = ConfigLoader.NormalizeBackslashes(input);
@@ -142,6 +139,35 @@ public class ConfigLoaderTests
     }
 
     [Fact]
+    public void NormalizeBackslashes_DoubleQuotedWindowsPath_DoublesEveryBackslash()
+    {
+        var input = "path: \"C:\\Users\\adam\\Desktop\"";
+        var result = ConfigLoader.NormalizeBackslashes(input);
+        Assert.Equal("path: \"C:\\\\Users\\\\adam\\\\Desktop\"", result);
+    }
+
+    [Fact]
+    public void LoadConfig_DoubleQuotedWindowsLogPath_KeepsBackslashesLiteral()
+    {
+        var dir = Directory.CreateTempSubdirectory("vhc-yaml-");
+        var path = Path.Combine(dir.FullName, "veeam-vhc-aws.yaml");
+        var expected = @"C:\ProgramData\VHC\logs\veeam-vhc-aws.log";
+        File.WriteAllText(path, "global:\n  logging:\n    file: \"" + expected + "\"\n");
+        try
+        {
+            var loaded = ConfigLoader.LoadConfig(path);
+            var file = loaded.GetSection("global").GetSection("logging").Get("file", "");
+            Assert.Equal(expected, file);
+            Assert.DoesNotContain("\u2029", file);
+            Assert.DoesNotContain("\u000B", file);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void NormalizeBackslashes_FixesInvalidUnicodeEscape()
     {
         // \Users — \U not followed by 8 hex digits → should be doubled
@@ -178,5 +204,61 @@ public class ConfigLoaderTests
         var dict = new Dictionary<string, object> { ["items"] = "not a list" };
         var result = dict.GetListOfStrings("items");
         Assert.Empty(result);
+    }
+
+    [Fact]
+    public void DeepMergeRecursesIntoYamlDotNetMaps()
+    {
+        var baseDict = new Dictionary<string, object>
+        {
+            ["b"] = new Dictionary<string, object> { ["x"] = 10, ["y"] = 20 },
+        };
+        var overlay = new Dictionary<string, object>
+        {
+            ["b"] = new Dictionary<object, object> { ["y"] = 30 },
+        };
+
+        var b = ConfigLoader.DeepMerge(baseDict, overlay).GetSection("b");
+
+        Assert.Equal(10, b.Get("x", 0));
+        Assert.Equal(30, b.Get("y", 0));
+    }
+
+    [Fact]
+    public void LoadConfigPartialGlobalBlockKeepsDefaults()
+    {
+        var global = LoadGlobal("global:\n  timeout_seconds: 60\n  logging:\n    level: INFO\n");
+
+        Assert.Equal(60, global.Get("timeout_seconds", 0));
+        Assert.Equal(600, global.Get("session_timeout_seconds", 0));
+        Assert.Equal(2, global.Get("retry_count", 0));
+        var logging = global.GetSection("logging");
+        Assert.Equal("INFO", logging.Get("level", ""));
+        Assert.Equal(30, logging.Get("rotation_keep", 0));
+        Assert.Equal("./veeam-vhc-aws.log", logging.Get("file", ""));
+    }
+
+    [Fact]
+    public void LoadConfigEmptyGlobalBlockKeepsDefaults()
+    {
+        var global = LoadGlobal("global:\nservers: []\n");
+
+        Assert.Equal(600, global.Get("session_timeout_seconds", 0));
+        Assert.Equal(30, global.Get("timeout_seconds", 0));
+    }
+
+    private static Dictionary<string, object> LoadGlobal(string yaml)
+    {
+        var dir = Directory.CreateTempSubdirectory("vhc-merge-");
+        try
+        {
+            var path = Path.Combine(dir.FullName, "veeam-vhc-aws.yaml");
+            File.WriteAllText(path, yaml);
+            return ConfigLoader.LoadConfig(path).GetSection("global");
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 }

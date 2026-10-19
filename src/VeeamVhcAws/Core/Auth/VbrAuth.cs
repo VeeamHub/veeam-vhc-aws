@@ -15,6 +15,7 @@ public class VbrAuth : ITokenProvider
     private string? _token;
     private DateTimeOffset _tokenExpiry = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private HttpClient? _boundClient;
 
     public VbrAuth(string baseUrl, string username, string password,
         string apiVersion = "1.3-rev1", bool verifySsl = true)
@@ -28,6 +29,36 @@ public class VbrAuth : ITokenProvider
 
     private bool IsTokenExpired() =>
         _token == null || DateTimeOffset.UtcNow >= _tokenExpiry.AddSeconds(-60);
+
+    internal void BindClient(HttpClient client) => _boundClient = client;
+
+    internal void Invalidate()
+    {
+        _semaphore.Wait();
+        try
+        {
+            _token = null;
+            _tokenExpiry = DateTimeOffset.MinValue;
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    internal void SeedToken(string token)
+    {
+        _semaphore.Wait();
+        try
+        {
+            _token = token;
+            _tokenExpiry = DateTimeOffset.UtcNow.AddHours(1);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
 
     public string GetToken()
     {
@@ -43,13 +74,16 @@ public class VbrAuth : ITokenProvider
             var url = $"{_baseUrl}/api/oauth2/token";
             Logger.Information("VBR OAuth2 token request to {Url} for user {User}", url, _username);
 
-            var handler = new HttpClientHandler();
-            if (!_verifySsl)
-                handler.ServerCertificateCustomValidationCallback =
-                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-
-            using var client = new HttpClient(handler);
-            client.DefaultRequestHeaders.TryAddWithoutValidation("x-api-version", _apiVersion);
+            var owned = _boundClient == null;
+            var client = _boundClient;
+            if (client == null)
+            {
+                var handler = new HttpClientHandler();
+                if (!_verifySsl)
+                    handler.ServerCertificateCustomValidationCallback =
+                        HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                client = new HttpClient(handler);
+            }
 
             var content = new FormUrlEncodedContent(new Dictionary<string, string>
             {
@@ -57,19 +91,29 @@ public class VbrAuth : ITokenProvider
                 ["username"] = _username,
                 ["password"] = _password,
             });
+            var tokenRequest = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+            tokenRequest.Headers.TryAddWithoutValidation("x-api-version", _apiVersion);
 
-            var response = client.PostAsync(url, content).GetAwaiter().GetResult();
-            response.EnsureSuccessStatusCode();
+            try
+            {
+                var response = client.SendAsync(tokenRequest).GetAwaiter().GetResult();
+                response.EnsureSuccessStatusCode();
 
-            var json = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            var tokenData = JsonDocument.Parse(json).RootElement;
+                var json = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                var tokenData = JsonDocument.Parse(json).RootElement;
 
-            _token = tokenData.GetProperty("access_token").GetString()!;
-            var expiresIn = tokenData.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 900;
-            _tokenExpiry = DateTimeOffset.UtcNow.AddSeconds(expiresIn);
+                _token = tokenData.GetProperty("access_token").GetString()!;
+                var expiresIn = tokenData.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 900;
+                _tokenExpiry = DateTimeOffset.UtcNow.AddSeconds(expiresIn);
 
-            Logger.Information("VBR OAuth2 token obtained, expires in {ExpiresIn}s", expiresIn);
-            return _token;
+                Logger.Information("VBR OAuth2 token obtained, expires in {ExpiresIn}s", expiresIn);
+                return _token;
+            }
+            finally
+            {
+                if (owned)
+                    client.Dispose();
+            }
         }
         finally
         {

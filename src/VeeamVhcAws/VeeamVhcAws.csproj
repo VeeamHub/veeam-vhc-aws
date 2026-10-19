@@ -38,17 +38,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.4.1" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="Spectre.Console" Version="0.49.1" />
     <PackageReference Include="YamlDotNet" Version="16.3.0" />
-    <PackageReference Include="Polly" Version="8.5.2" />
-    <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="Serilog" Version="4.2.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
-    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="MailKit" Version="4.18.1" />
+    <!-- MimeKit depends on Pkcs >= 10.0.0, which restores 10.0.0. Pin the patched release. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageReference Include="prometheus-net" Version="8.2.1" />
   </ItemGroup>
 
@@ -66,6 +66,12 @@
   <ItemGroup>
     <EmbeddedResource Include="config\example.yaml">
       <LogicalName>VeeamVhcAws.config.example.yaml</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\scripts\vhc-tasks.ps1">
+      <LogicalName>VeeamVhcAws.scripts.vhc-tasks.ps1</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\docs\USER_GUIDE.md">
+      <LogicalName>VeeamVhcAws.docs.USER_GUIDE.md</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

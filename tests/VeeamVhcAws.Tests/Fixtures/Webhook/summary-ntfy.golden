@@ -1,0 +1,14 @@
+Content-Type: text/plain; charset=utf-8
+Title: Daily Summary: ERROR
+Priority: urgent
+Tags: x
+Markdown: yes
+**Daily Veeam Health Summary — {{DATE}}**
+
+**Issues (4):**
+⚠️ [vbr1] repo:Primary — Free space 8% is below the 10% threshold
+🔴 [vbr1] repo:Archive — Backup failed for 12 workloads. Workloads: **12 items (\syn01\docker…)**
+⚠️ [vbr1] repo:Seen — Already reported
+🔴 [vbaws1] connection — Unable to connect to VBAWS
+
+**Healthy:** retention (vbr1)
