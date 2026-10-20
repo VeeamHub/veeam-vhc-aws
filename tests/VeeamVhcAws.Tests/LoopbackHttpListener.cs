@@ -26,6 +26,13 @@ internal static class LoopbackHttpListener
         }
     }
 
+    // The managed HttpListener on Linux can throw "Address already in use" while it tears
+    // down (seen on CI in #47 and #51). Teardown must not fail a test whose assertions passed.
+    public static void StopQuietly(this HttpListener listener)
+    {
+        try { listener.Close(); } catch (HttpListenerException) { }
+    }
+
     private static int ProbeFreePort()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0);
