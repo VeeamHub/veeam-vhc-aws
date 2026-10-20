@@ -135,6 +135,10 @@ jobs:
             Write-Host "::warning::Unexpected loose files in publish output: $($stray.Name -join ', ')"
           }
 
+      - name: Smoke test admin UI (launch + real pages)
+        shell: pwsh
+        run: ./.github/scripts/smoke-ui.ps1 -Exe dist/win-x64/veeam-vhc-aws.exe -ExampleConfig config/example.yaml
+
       - name: Bundle release zip
         shell: pwsh
         run: |
