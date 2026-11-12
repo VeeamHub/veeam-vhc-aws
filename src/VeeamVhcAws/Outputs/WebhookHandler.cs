@@ -47,9 +47,13 @@ public class WebhookHandler : IOutputHandler
 
     internal IReadOnlyList<string> Logs => _logs;
 
+    private readonly TimeProvider _clock;
+
     public WebhookHandler(string url, string template = "generic",
-        string minSeverity = "ok", bool deduplicate = true, bool allowLoopback = false)
+        string minSeverity = "ok", bool deduplicate = true, bool allowLoopback = false,
+        TimeProvider? clock = null)
     {
+        _clock = clock ?? TimeProvider.System;
         _url = url;
         _template = template.ToLowerInvariant();
         _minSeverity = SeverityExtensions.ParseSeverity(minSeverity);
@@ -303,7 +307,7 @@ public class WebhookHandler : IOutputHandler
 
     private Dictionary<string, object> FormatNtfySummary(IReadOnlyList<MonitorResult> results)
     {
-        var now = DateTime.Now;
+        var now = _clock.GetLocalNow();
         var dateStr = $"{now:MMMM} {now.Day}, {now.Year}";
 
         var issueLines = new List<string>();
