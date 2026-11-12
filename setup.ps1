@@ -714,9 +714,9 @@ function Protect-VhcSystemDirectory {
 
 function Read-VerifySslChoice {
     param([string]$ProductName)
-    $answer = Read-Host "  Verify the TLS certificate for $ProductName? (y/n) [y]"
+    $answer = Read-Host "  Verify the TLS certificate for ${ProductName}? (y/n) [y]"
     if ($answer -match '^[nN]') {
-        Write-Host "  WARNING: TLS verification is off. An on-path attacker can collect the $ProductName password." -ForegroundColor Red
+        Write-Host "  WARNING: TLS verification is off. An on-path attacker can collect the ${ProductName} password." -ForegroundColor Red
         return $false
     }
     return $true
