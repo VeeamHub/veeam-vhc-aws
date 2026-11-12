@@ -75,7 +75,7 @@ Deliver a continuously-running, single-binary monitor for Veeam VBR and VBAWS ba
 - [ ] **ISC-16**: `setup.ps1` (run as Administrator) creates a Windows Scheduled Task named exactly `Veeam VHC AWS` that runs every 5 minutes.
 - [ ] **ISC-17**: Logging respects `global.logging.{level,file,rotation_keep,console,disk_warning_pct}`; log file is named `veeam-vhc-aws-YYYYMMDD.log` (dash before date).
 - [ ] **ISC-18**: When `output: [json_stdout]` is the only handler, stdout is a single valid JSON document per run (no chrome).
-- [ ] **ISC-19**: `WebhookHandler` renders all five templates (`ntfy`, `slack`, `teams`, `pagerduty`, `generic`) without throwing and `min_severity` filtering is applied before send.
+- [ ] **ISC-19**: `WebhookHandler` renders all five templates (`ntfy`, `slack`, `teams`, `pagerduty`, `generic`) without throwing and `min_severity` filtering is applied before send; payload bytes, including the 3800-char ntfy cut, do not depend on the date the tests run (the handler takes a `TimeProvider`).
 - [ ] **ISC-20**: `EmailHandler` does **not** send when the digest contains zero findings (empty-email suppression).
 - [ ] **ISC-21**: With 3 servers configured, `MonitorRunner` dispatches them via `Task.WhenAll` and total wall-clock time is below the sum of individual server times.
 - [ ] **ISC-22**: With one server configured to an unreachable URL and two reachable, the unreachable server raises a single error-severity finding and the other two complete normally (failure isolation).
