@@ -139,7 +139,7 @@ public class WebhookPayloadTests
         try
         {
             var handler = new WebhookHandler($"http://127.0.0.1:{port}/hook", template, "ok",
-                deduplicate: deduplicate, allowLoopback: true);
+                deduplicate: deduplicate, allowLoopback: true, clock: FixedClock.Instance);
             handler.Emit(results);
             var finished = await Task.WhenAny(serve, Task.Delay(TimeSpan.FromSeconds(5)));
             Assert.True(ReferenceEquals(serve, finished), $"no request received; logs: {string.Join(" | ", handler.Logs)}");
@@ -153,9 +153,9 @@ public class WebhookPayloadTests
 
     private static void AssertGolden(string name, Sent sent, [CallerFilePath] string callerPath = "")
     {
-        // The daily summary embeds today's local date; swap it for a placeholder.
-        var now = DateTime.Now;
-        var actual = sent.Render().Replace($"{now:MMMM} {now.Day}, {now.Year}", DatePlaceholder);
+        // The daily summary embeds the handler clock's date. The clock is pinned so the
+        // 3800-char ntfy cut lands in the same place every month; the date reads as a placeholder.
+        var actual = sent.Render().Replace("January 2, 2026", DatePlaceholder);
 
         if (Environment.GetEnvironmentVariable("VHC_UPDATE_WEBHOOK_GOLDENS") == "1")
         {
@@ -169,5 +169,13 @@ public class WebhookPayloadTests
         var goldenPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Webhook", $"{name}.golden");
         Assert.True(File.Exists(goldenPath), $"missing golden {goldenPath}");
         Assert.Equal(File.ReadAllText(goldenPath), actual);
+    }
+
+    /// <summary>Pins "now" to <see cref="Ts"/> in UTC so payload bytes never depend on the run date.</summary>
+    private sealed class FixedClock : TimeProvider
+    {
+        public static readonly FixedClock Instance = new();
+        public override DateTimeOffset GetUtcNow() => new(Ts);
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
     }
 }

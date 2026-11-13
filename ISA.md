@@ -75,10 +75,11 @@ Deliver a continuously-running, single-binary monitor for Veeam VBR and VBAWS ba
 - [ ] **ISC-16**: `setup.ps1` (run as Administrator) creates a Windows Scheduled Task named exactly `Veeam VHC AWS` that runs every 5 minutes.
 - [ ] **ISC-17**: Logging respects `global.logging.{level,file,rotation_keep,console,disk_warning_pct}`; log file is named `veeam-vhc-aws-YYYYMMDD.log` (dash before date).
 - [ ] **ISC-18**: When `output: [json_stdout]` is the only handler, stdout is a single valid JSON document per run (no chrome).
-- [ ] **ISC-19**: `WebhookHandler` renders all five templates (`ntfy`, `slack`, `teams`, `pagerduty`, `generic`) without throwing and `min_severity` filtering is applied before send.
+- [ ] **ISC-19**: `WebhookHandler` renders all five templates (`ntfy`, `slack`, `teams`, `pagerduty`, `generic`) without throwing and `min_severity` filtering is applied before send; payload bytes, including the 3800-char ntfy cut, do not depend on the date the tests run (the handler takes a `TimeProvider`).
 - [ ] **ISC-20**: `EmailHandler` does **not** send when the digest contains zero findings (empty-email suppression).
 - [ ] **ISC-21**: With 3 servers configured, `MonitorRunner` dispatches them via `Task.WhenAll` and total wall-clock time is below the sum of individual server times.
 - [ ] **ISC-22**: With one server configured to an unreachable URL and two reachable, the unreachable server raises a single error-severity finding and the other two complete normally (failure isolation).
+- [ ] **ISC-26**: `setup.ps1` runs every interactive prompt under `Set-StrictMode -Version Latest` without an undefined-variable error: no double-quoted string interpolates a bare `$name` directly followed by `?` or `:` (PowerShell reads those as part of the name); such variables are written `${name}`.
 - [ ] **Anti: ISC-23**: No write-side VBR or VBAWS API call appears anywhere in `Core/Clients/`. The codebase does not POST/PUT/DELETE to repo, job, session, or worker endpoints.
 - [ ] **Anti: ISC-24**: `CrossCorrelator.Correlate()` is never called with `Finding` lists spanning more than one server. Cross-server correlation is structurally impossible.
 - [ ] **Anti: ISC-25**: No custom AES, no hand-rolled key derivation, no homemade HMAC. All crypto goes through `System.Security.Cryptography` BCL primitives.
@@ -111,6 +112,7 @@ Deliver a continuously-running, single-binary monitor for Veeam VBR and VBAWS ba
 | ISC-20 | unit        | `WebhookHandlerTests`/`EmailHandlerTests` — zero-finding suppression                                                | pass      | xUnit                      |
 | ISC-21 | intg        | 3-server WireMock fixture; assert wall-clock < sum-of-individuals                                                   | pass      | xUnit + WireMock           |
 | ISC-22 | intg        | 3-server fixture, one URL unreachable; assert remaining two finish + 1 error finding                                | pass      | xUnit + WireMock           |
+| ISC-26 | static      | `grep -nE '\$[A-Za-z_]+[?:]' setup.ps1 build.ps1` shows no hits beyond `$env:`/`$script:` scopes; wizard run on Windows reaches step 3 | exact     | Bash + grep, PowerShell |
 | ISC-23 | static      | `grep -rE '(POST\|PUT\|DELETE)' src/VeeamVhcAws/Core/Clients/` matches only auth-token POSTs                        | exact     | Bash + grep                |
 | ISC-24 | static      | search `CrossCorrelator.Correlate` callsites — all receive `Finding[]` from a single `ServerContext`                | exact     | code review + grep         |
 | ISC-25 | static      | `grep -rE '(Aes\.Create\|new HMAC\|Rfc2898)' src/` — confirm BCL-only crypto, no hand-rolled primitives             | exact     | Bash + grep                |
