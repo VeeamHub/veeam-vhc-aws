@@ -146,6 +146,9 @@ jobs:
           Copy-Item dist/win-x64/veeam-vhc-aws.exe release-bundle/
           Copy-Item dist/win-x64/wwwroot release-bundle/ -Recurse   # admin UI static assets (required by `ui`)
           Copy-Item setup.ps1 release-bundle/
+          # setup.ps1 calls scripts\vhc-tasks.ps1 to create the scheduled tasks.
+          New-Item -ItemType Directory -Force -Path release-bundle/scripts | Out-Null
+          Copy-Item scripts/vhc-tasks.ps1 release-bundle/scripts/
           Copy-Item config/example.yaml release-bundle/
           # Single-quoted here-string: fully literal, so the backtick in `ui` is
           # not parsed as a PowerShell `u{ } Unicode escape. No interpolation needed.
@@ -179,8 +182,19 @@ jobs:
           $zip = "veeam-vhc-aws-${{ steps.version.outputs.tag }}-windows.zip"
           Compress-Archive -Path release-bundle/* -DestinationPath $zip
           Write-Host "--- Zip contents ---"
-          [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path).Entries |
-            Select-Object FullName, Length
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path)
+          $entries = $archive.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
+          $archive.Entries | Select-Object FullName, Length
+          $archive.Dispose()
+          # Every file setup.ps1 loads from $PSScriptRoot must ship in the zip.
+          $required = @('veeam-vhc-aws.exe', 'setup.ps1', 'example.yaml', 'scripts/vhc-tasks.ps1')
+          $required += [regex]::Matches((Get-Content setup.ps1 -Raw), 'Join-Path \$PSScriptRoot "([^"]+)"') |
+            ForEach-Object { $_.Groups[1].Value -replace '\\', '/' }
+          $missing = $required | Sort-Object -Unique | Where-Object { $_ -notin $entries }
+          if ($missing) {
+            Write-Host "::error::Release zip is missing files setup.ps1 needs: $($missing -join ', ')"
+            exit 1
+          }
 
       # --- VirusTotal scan (optional, requires VT_API_KEY secret) ---
       - name: Check VT API key configured
