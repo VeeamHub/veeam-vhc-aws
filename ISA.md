@@ -80,6 +80,7 @@ Deliver a continuously-running, single-binary monitor for Veeam VBR and VBAWS ba
 - [ ] **ISC-21**: With 3 servers configured, `MonitorRunner` dispatches them via `Task.WhenAll` and total wall-clock time is below the sum of individual server times.
 - [ ] **ISC-22**: With one server configured to an unreachable URL and two reachable, the unreachable server raises a single error-severity finding and the other two complete normally (failure isolation).
 - [ ] **ISC-26**: `setup.ps1` runs every interactive prompt under `Set-StrictMode -Version Latest` without an undefined-variable error: no double-quoted string interpolates a bare `$name` directly followed by `?` or `:` (PowerShell reads those as part of the name); such variables are written `${name}`.
+- [ ] **ISC-27**: The release zip contains every file `setup.ps1` loads relative to `$PSScriptRoot` (today `scripts/vhc-tasks.ps1`), so the scheduled-task step works from an unzipped release; the release job fails if one is missing.
 - [ ] **Anti: ISC-23**: No write-side VBR or VBAWS API call appears anywhere in `Core/Clients/`. The codebase does not POST/PUT/DELETE to repo, job, session, or worker endpoints.
 - [ ] **Anti: ISC-24**: `CrossCorrelator.Correlate()` is never called with `Finding` lists spanning more than one server. Cross-server correlation is structurally impossible.
 - [ ] **Anti: ISC-25**: No custom AES, no hand-rolled key derivation, no homemade HMAC. All crypto goes through `System.Security.Cryptography` BCL primitives.
@@ -113,6 +114,7 @@ Deliver a continuously-running, single-binary monitor for Veeam VBR and VBAWS ba
 | ISC-21 | intg        | 3-server WireMock fixture; assert wall-clock < sum-of-individuals                                                   | pass      | xUnit + WireMock           |
 | ISC-22 | intg        | 3-server fixture, one URL unreachable; assert remaining two finish + 1 error finding                                | pass      | xUnit + WireMock           |
 | ISC-26 | static      | `grep -nE '\$[A-Za-z_]+[?:]' setup.ps1 build.ps1` shows no hits beyond `$env:`/`$script:` scopes; wizard run on Windows reaches step 3 | exact     | Bash + grep, PowerShell |
+| ISC-27 | release     | release.yml "Bundle release zip" step asserts each `Join-Path $PSScriptRoot` target of `setup.ps1` is a zip entry; job exits 1 otherwise | exact     | GitHub Actions (pwsh)   |
 | ISC-23 | static      | `grep -rE '(POST\|PUT\|DELETE)' src/VeeamVhcAws/Core/Clients/` matches only auth-token POSTs                        | exact     | Bash + grep                |
 | ISC-24 | static      | search `CrossCorrelator.Correlate` callsites — all receive `Finding[]` from a single `ServerContext`                | exact     | code review + grep         |
 | ISC-25 | static      | `grep -rE '(Aes\.Create\|new HMAC\|Rfc2898)' src/` — confirm BCL-only crypto, no hand-rolled primitives             | exact     | Bash + grep                |
