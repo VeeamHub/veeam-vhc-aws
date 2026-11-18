@@ -84,4 +84,28 @@ public class SetupScriptTests
         Assert.Contains("Invoke-WebRequest", script);
         Assert.Contains("exit $code", script);
     }
+
+    [Fact]
+    public void TaskScript_NeverAssignsItsValidatedActionParameter()
+    {
+        // PowerShell variable names are case-insensitive: "$action = ..." inside
+        // vhc-tasks.ps1 assigns the [ValidateSet] -Action parameter and throws, which
+        // stopped register-daily from ever creating the daily summary task.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "scripts", "vhc-tasks.ps1")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        var script = File.ReadAllText(Path.Combine(dir!.FullName, "scripts", "vhc-tasks.ps1"));
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"\$action\s*=(?!=)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase), script);
+    }
+
+    [Fact]
+    public void Setup_DiscardsTaskScriptOutputItDoesNotUse()
+    {
+        var text = SetupText();
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(
+            @"^\s*& \$taskScript -Action (register-daily|unregister-daily|write-wrapper)\b(?!.*\| Out-Null)",
+            System.Text.RegularExpressions.RegexOptions.Multiline), text);
+    }
 }
