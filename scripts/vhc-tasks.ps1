@@ -104,7 +104,9 @@ switch ($Action) {
             Write-VhcFailureWrapper -Directory $InstallDir -Alert $AlertUrl | Out-Null
         }
         $argument = Get-VhcTaskArgument -WrapperPath $wrapper -Cmd 'summary' -Config $ConfigPath
-        $action = New-ScheduledTaskAction `
+        # Not $action: PowerShell names are case-insensitive, so that would assign the
+        # [ValidateSet] -Action parameter and throw.
+        $taskAction = New-ScheduledTaskAction `
             -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
             -Argument $argument `
             -WorkingDirectory $InstallDir
@@ -127,7 +129,7 @@ switch ($Action) {
         }
         Register-ScheduledTask `
             -TaskName $TaskName `
-            -Action $action `
+            -Action $taskAction `
             -Trigger $trigger `
             -Settings $settings `
             -Principal $principal `
