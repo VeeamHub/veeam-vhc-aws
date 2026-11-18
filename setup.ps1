@@ -400,8 +400,8 @@ if ($Upgrade) {
                     Write-Host "  -> daily_summary added to config" -ForegroundColor Green
 
                     $taskScript = Join-Path $PSScriptRoot "scripts\vhc-tasks.ps1"
-                    & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
-                    & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeDest -ConfigPath $configPath -Time $dsTime -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" })
+                    & $taskScript -Action write-wrapper -InstallDir $InstallDir -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" }) | Out-Null
+                    & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeDest -ConfigPath $configPath -Time $dsTime -AlertUrl $(if ($AlertUrl) { $AlertUrl } else { "" }) | Out-Null
                     Write-Host "  -> Scheduled task 'Veeam VHC AWS Daily Summary' created (daily at $dsTime)" -ForegroundColor Green
                     $anyUpdates = $true
                 } else {
@@ -1137,10 +1137,10 @@ Register-ScheduledTask `
 Write-Host "  -> Scheduled task '$taskName' created (every $IntervalMinutes min)" -ForegroundColor Green
 
 if ($setupSummary) {
-    & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeFullPath -ConfigPath $configPath -Time $summaryTimeVal -AlertUrl $alertUrlEscaped
+    & $taskScript -Action register-daily -InstallDir $InstallDir -ExePath $exeFullPath -ConfigPath $configPath -Time $summaryTimeVal -AlertUrl $alertUrlEscaped | Out-Null
     Write-Host "  -> Daily summary task 'Veeam VHC AWS Daily Summary' created (daily at $summaryTimeVal)" -ForegroundColor Green
 } else {
-    & $taskScript -Action unregister-daily
+    & $taskScript -Action unregister-daily | Out-Null
 }
 
 # --- 4. Run once to test ---
